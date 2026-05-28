@@ -325,6 +325,41 @@ input[type=file]{ display:none; }
 ::-webkit-scrollbar{ width:3px; }
 ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:2px; }
 .section-title{ font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:3px; color:var(--cyan); text-transform:uppercase; margin-bottom:16px; }
+
+/* ── VERSUS ── */
+.vs-type-card {
+  display:flex; align-items:center; gap:14px;
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:10px; padding:14px 16px; cursor:pointer;
+  transition:border-color 0.2s;
+}
+.vs-type-card.active { border-color:var(--cyan); }
+.vs-type-icon { font-size:28px; flex-shrink:0; }
+.vs-type-name { font-family:'Orbitron',sans-serif; font-size:11px; font-weight:700; color:var(--white); letter-spacing:2px; }
+.vs-type-desc { font-size:10px; color:var(--muted); margin-top:3px; line-height:1.4; }
+.vs-player-row {
+  display:flex; align-items:center; gap:12px;
+  background:var(--panel); border:1px solid var(--border);
+  border-radius:10px; padding:12px 14px; cursor:pointer;
+  transition:border-color 0.2s;
+}
+.vs-player-row.filled { border-color:var(--cyan); }
+.vs-player-info { flex:1; min-width:0; }
+.vs-photo-thumb {
+  width:64px; height:64px; border-radius:8px; object-fit:cover;
+  border:2px solid var(--border); cursor:pointer; flex-shrink:0;
+  transition:border-color 0.2s;
+}
+.vs-photo-thumb.selected { border-color:var(--cyan); }
+.vr-card {
+  flex:1; background:var(--panel); border-radius:10px;
+  padding:14px 12px; display:flex; flex-direction:column;
+  align-items:center; gap:6px; border:1px solid var(--border);
+}
+.vr-card.winner { border-color:var(--yellow); }
+.vr-card-name { font-family:'Orbitron',sans-serif; font-size:11px; color:var(--white); font-weight:700; text-align:center; }
+.vr-card-pct { font-family:'Orbitron',sans-serif; font-size:24px; font-weight:900; }
+.vr-card-score { font-size:10px; color:var(--muted); }
 </style>
 </head>
 <body>
@@ -406,7 +441,7 @@ input[type=file]{ display:none; }
       <div class="ob-progress"><div class="ob-progress-fill" style="width:85%"></div></div>
     </div>
     <div class="ob-title">Carga tus 15 fotos</div>
-    <div class="ob-sub" id="obPhotoSub">0 / 15 — necesitas las 15 para jugar</div>
+    <div class="ob-sub" id="obPhotoSub">0 / 15 fotos cargadas — puedes agregar más después</div>
     <div class="photo-mini-grid" id="obPhotoGrid"></div>
     <div class="photo-upload-zone" id="obUploadZone" onclick="document.getElementById('obPhotoInput').click()">
       <div class="puz-icon">📷</div>
@@ -414,7 +449,7 @@ input[type=file]{ display:none; }
       <div class="puz-count" id="obUploadCount">Toca para agregar fotos</div>
     </div>
     <input type="file" id="obPhotoInput" accept="image/*" multiple onchange="handleObPhotos(this.files)">
-    <button class="btn-primary" onclick="obNext(5)" id="obBtn5" disabled>EMPEZAR A JUGAR ▶</button>
+    <button class="btn-primary" onclick="obNext(5)" id="obBtn5" disabled>AGREGA AL MENOS 1 FOTO</button>
   </div>
 </div>
 
@@ -431,6 +466,7 @@ input[type=file]{ display:none; }
       </div>
     </div>
     <button class="home-btn hb-play" onclick="showScreen('albumScreen')">▶ JUGAR</button>
+    <button class="home-btn hb-versus" onclick="initVersusSetup()" style="background:transparent;border:1px solid var(--orange);border-style:solid;color:var(--orange);">⚔ VERSUS</button>
     <button class="home-btn hb-scores" onclick="showScreen('scoresScreen')">🏆 TOP GLOBAL</button>
     <button class="home-btn hb-switch" onclick="showScreen('profileSelect')">⇄ CAMBIAR PERFIL</button>
   </div>
@@ -564,6 +600,101 @@ input[type=file]{ display:none; }
   </div>
 </div>
 
+
+<!-- VERSUS SETUP -->
+<div id="versusSetup" class="screen">
+  <div class="setup-header">
+    <button class="back-btn" onclick="showScreen('homeScreen')">←</button>
+    <div class="album-header-title">Modo Versus</div>
+  </div>
+  <div class="setup-body">
+    <div class="setup-section">
+      <div class="setup-label">Tipo de versus</div>
+      <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:400px;">
+        <div class="vs-type-card active" id="vsTypeFoto" onclick="selectVsType('foto')">
+          <div class="vs-type-icon">📸</div>
+          <div>
+            <div class="vs-type-name">VERSUS FOTO</div>
+            <div class="vs-type-desc">Cada quien juega la misma foto · Gana quien capture más %</div>
+          </div>
+        </div>
+        <div class="vs-type-card" id="vsTypeTurnos" onclick="selectVsType('turnos')">
+          <div class="vs-type-icon">🔄</div>
+          <div>
+            <div class="vs-type-name">VERSUS TURNOS</div>
+            <div class="vs-type-desc">Se pasan el teléfono · Acumulan puntos juntos</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="setup-section" style="margin-top:8px;">
+      <div class="setup-label">Jugador 1</div>
+      <div class="vs-player-row" id="vsP1Row" onclick="selectVsPlayer(1)">
+        <div id="vsP1Avatar"></div>
+        <div class="vs-player-info">
+          <div id="vsP1Name" style="font-family:'Orbitron',sans-serif;font-size:13px;color:#fff;">— Seleccionar —</div>
+          <div id="vsP1Stats" style="font-size:10px;color:var(--muted);margin-top:2px;"></div>
+        </div>
+        <div style="color:var(--muted);font-size:18px;">›</div>
+      </div>
+    </div>
+    <div class="setup-section">
+      <div class="setup-label">Jugador 2</div>
+      <div class="vs-player-row" id="vsP2Row" onclick="selectVsPlayer(2)">
+        <div id="vsP2Avatar"></div>
+        <div class="vs-player-info">
+          <div id="vsP2Name" style="font-family:'Orbitron',sans-serif;font-size:13px;color:#fff;">— Seleccionar —</div>
+          <div id="vsP2Stats" style="font-size:10px;color:var(--muted);margin-top:2px;"></div>
+        </div>
+        <div style="color:var(--muted);font-size:18px;">›</div>
+      </div>
+    </div>
+    <div class="setup-section" id="vsPhotoSection">
+      <div class="setup-label">Foto a jugar</div>
+      <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;" id="vsPhotoStrip"></div>
+    </div>
+  </div>
+  <div class="setup-footer">
+    <button class="btn-primary" onclick="startVersus()" id="vsStartBtn" disabled>INICIAR VERSUS ⚔</button>
+  </div>
+</div>
+
+<!-- VERSUS PLAYER SELECT -->
+<div id="versusPlayerSelect" class="screen">
+  <div class="setup-header">
+    <button class="back-btn" onclick="showScreen('versusSetup')">←</button>
+    <div class="album-header-title" id="vsSelectTitle">Jugador 1</div>
+  </div>
+  <div class="setup-body">
+    <div class="profile-cards" id="vsProfileCards" style="width:100%;max-width:400px;"></div>
+  </div>
+</div>
+
+<!-- PASS PHONE SCREEN -->
+<div id="passPhone" class="screen">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;padding:32px;background:var(--navy);">
+    <div style="font-size:56px;">📱</div>
+    <div style="font-family:'Orbitron',sans-serif;font-size:14px;font-weight:700;letter-spacing:3px;color:var(--white);text-align:center;" id="passPhoneTitle">PASA EL TELÉFONO</div>
+    <div style="font-family:'Orbitron',sans-serif;font-size:22px;font-weight:900;color:var(--cyan);text-align:center;" id="passPhoneName">JUGADOR 2</div>
+    <div style="font-size:11px;color:var(--muted);text-align:center;letter-spacing:2px;">Tu turno · Captura el máximo área posible</div>
+    <div id="passPhoneAvatar" style="margin:8px 0;"></div>
+    <button class="btn-primary" style="max-width:280px;" onclick="startVersusRound()">ESTOY LISTO ▶</button>
+  </div>
+</div>
+
+<!-- VERSUS RESULT -->
+<div id="versusResult" class="screen">
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;padding:28px;background:var(--bg);">
+    <div style="font-family:'Orbitron',sans-serif;font-size:12px;letter-spacing:4px;color:var(--muted);">RESULTADO FINAL</div>
+    <div style="font-family:'Orbitron',sans-serif;font-size:28px;font-weight:900;color:var(--yellow);text-align:center;" id="vrWinnerName">—</div>
+    <div style="font-size:11px;letter-spacing:2px;color:var(--muted);" id="vrWinnerSub">GANADOR</div>
+    <div style="display:flex;gap:12px;width:100%;max-width:360px;margin:8px 0;" id="vrCards"></div>
+    <div style="width:100%;max-width:360px;display:flex;flex-direction:column;gap:8px;">
+      <button class="btn-primary" onclick="startVersus()">REVANCHA ⚔</button>
+      <button class="btn-secondary" onclick="showScreen('homeScreen')">MENÚ PRINCIPAL</button>
+    </div>
+  </div>
+</div>
 <script src="game.js"></script>
 </body>
 </html>

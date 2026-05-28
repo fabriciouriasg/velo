@@ -271,9 +271,10 @@ function updateObPhotoCount() {
   const sub = document.getElementById('obPhotoSub');
   const btn = document.getElementById('obBtn5');
   const countEl = document.getElementById('obUploadCount');
-  sub.textContent = `${n} / ${MAX_PHOTOS} — ${n < MAX_PHOTOS ? 'necesitas las 15 para jugar' : '¡Listo!'}`;
-  countEl.textContent = n >= MAX_PHOTOS ? '✓ Fotos completas' : `${MAX_PHOTOS - n} más para completar`;
-  btn.disabled = n < MAX_PHOTOS;
+  sub.textContent = `${n} / ${MAX_PHOTOS} fotos cargadas${n >= MAX_PHOTOS ? ' — ¡Completo!' : ' — puedes agregar más después'}`;
+  countEl.textContent = n >= MAX_PHOTOS ? '✓ ¡Álbum completo!' : n > 0 ? `${MAX_PHOTOS - n} más disponibles` : 'Toca para agregar fotos';
+  btn.disabled = n < 1;
+  btn.textContent = n >= MAX_PHOTOS ? 'EMPEZAR A JUGAR ▶' : n > 0 ? `JUGAR CON ${n} FOTOS ▶` : 'AGREGA AL MENOS 1 FOTO';
 }
 
 async function handleObPhotos(files) {
@@ -599,6 +600,10 @@ function initCanvas() {
       if (G.timeLeft <= 0) {
         clearInterval(G.timerInterval);
         cancelAnimationFrame(animId);
+        if(G.isVersus){
+          versusRoundEnd(getCapturedPct(), G.totalScore);
+          return;
+        }
         document.getElementById('loseScore').textContent = G.totalScore.toLocaleString();
         document.getElementById('loseLevel').textContent = G.level;
         document.getElementById('loseOverlay').classList.add('active');
@@ -765,6 +770,10 @@ function checkWin(){
   if(pct>=G.targetPct){
     cancelAnimationFrame(animId);
     if(G.timerInterval) clearInterval(G.timerInterval);
+    if(G.isVersus){
+      versusRoundEnd(pct, G.totalScore);
+      return;
+    }
     document.getElementById('winPct').textContent=pct+'%';
     document.getElementById('winScore').textContent=G.score.toLocaleString();
     document.getElementById('winTotal').textContent=G.totalScore.toLocaleString();
@@ -941,6 +950,254 @@ function fileToDataURL(file){
 }
 
 document.addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+
+
+// ═══════════════════════════════════════════
+//  VERSUS STATE
+// ═══════════════════════════════════════════
+let VS = {
+  type: 'foto',       // 'foto' | 'turnos'
+  p1: null,           // profile object
+  p2: null,           // profile object
+  photoId: null,      // selected photo id
+  selectingPlayer: 1, // which player slot being filled
+  // Round results
+  results: [],        // [{profile, pct, score}]
+  currentTurn: 0,     // 0=p1, 1=p2 (turnos mode)
+  turnoScores: [0, 0],
+};
+
+// ═══════════════════════════════════════════
+//  VERSUS SETUP
+// ═══════════════════════════════════════════
+function initVersusSetup() {
+  VS = { type:'foto', p1:null, p2:null, photoId:null, selectingPlayer:1, results:[], currentTurn:0, turnoScores:[0,0] };
+  showScreen('versusSetup');
+  renderVsSetup();
+}
+
+function renderVsSetup() {
+  // Photo strip — use active profile photos by default
+  const photos = activeProfile?.photos || [];
+  const strip = document.getElementById('vsPhotoStrip');
+  strip.innerHTML = '';
+  photos.forEach(p => {
+    const img = document.createElement('img');
+    img.className = 'vs-photo-thumb' + (p.id === VS.photoId ? ' selected' : '');
+    img.src = p.dataURL;
+    img.onclick = () => { VS.photoId = p.id; renderVsSetup(); };
+    strip.appendChild(img);
+  });
+
+  // Player 1
+  renderVsPlayerSlot(1);
+  renderVsPlayerSlot(2);
+
+  // Enable start button
+  const canStart = VS.p1 && VS.p2 && VS.p1.id !== VS.p2.id &&
+    (VS.type === 'turnos' || VS.photoId);
+  document.getElementById('vsStartBtn').disabled = !canStart;
+}
+
+function renderVsPlayerSlot(n) {
+  const p = n === 1 ? VS.p1 : VS.p2;
+  const avatarEl = document.getElementById(`vsP${n}Avatar`);
+  const nameEl   = document.getElementById(`vsP${n}Name`);
+  const statsEl  = document.getElementById(`vsP${n}Stats`);
+  const rowEl    = document.getElementById(`vsP${n}Row`);
+
+  if (p) {
+    avatarEl.innerHTML = avatarHTML(p, 40);
+    nameEl.textContent = p.name;
+    statsEl.textContent = `Nv.${p.level||1} · ${(p.totalScore||0).toLocaleString()} pts`;
+    rowEl.classList.add('filled');
+  } else {
+    avatarEl.innerHTML = `<div style="width:40px;height:40px;border-radius:50%;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--muted);">?</div>`;
+    nameEl.textContent = '— Seleccionar —';
+    statsEl.textContent = '';
+    rowEl.classList.remove('filled');
+  }
+}
+
+function selectVsType(type) {
+  VS.type = type;
+  document.getElementById('vsTypeFoto').classList.toggle('active', type==='foto');
+  document.getElementById('vsTypeTurnos').classList.toggle('active', type==='turnos');
+  document.getElementById('vsPhotoSection').style.display = type==='foto' ? '' : 'none';
+  renderVsSetup();
+}
+
+function selectVsPlayer(n) {
+  VS.selectingPlayer = n;
+  document.getElementById('vsSelectTitle').textContent = `Jugador ${n}`;
+  showScreen('versusPlayerSelect');
+  renderVsProfileCards();
+}
+
+function renderVsProfileCards() {
+  const container = document.getElementById('vsProfileCards');
+  container.innerHTML = '';
+  profiles.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'profile-card';
+    const n = VS.selectingPlayer;
+    const other = n === 1 ? VS.p2 : VS.p1;
+    const isOther = other?.id === p.id;
+    if (isOther) card.classList.add('locked');
+    card.innerHTML = `
+      ${avatarHTML(p, 48)}
+      <div class="p-info">
+        <div class="p-name">${p.name}</div>
+        <div class="p-stats">Nv.${p.level||1} · ${(p.totalScore||0).toLocaleString()} pts</div>
+      </div>
+      ${isOther ? '<div style="font-size:10px;color:var(--muted);">En uso</div>' : ''}
+    `;
+    if (!isOther) {
+      card.onclick = () => {
+        if (n === 1) VS.p1 = p; else VS.p2 = p;
+        showScreen('versusSetup');
+        renderVsSetup();
+      };
+    }
+    container.appendChild(card);
+  });
+
+  // Add "invite" hint if only 1 profile
+  if (profiles.length < 2) {
+    const hint = document.createElement('div');
+    hint.style.cssText = 'text-align:center;color:var(--muted);font-size:11px;padding:20px;line-height:1.8;';
+    hint.textContent = 'Necesitas al menos 2 perfiles para jugar Versus. Ve al menú principal y crea otro perfil.';
+    container.appendChild(hint);
+  }
+}
+
+// ═══════════════════════════════════════════
+//  START VERSUS
+// ═══════════════════════════════════════════
+function startVersus() {
+  VS.results = [];
+  VS.turnoScores = [0, 0];
+  VS.currentTurn = 0;
+
+  if (VS.type === 'foto') {
+    // P1 goes first
+    showPassPhone(VS.p1, 'PRIMER TURNO');
+  } else {
+    // Turnos: P1 starts
+    showPassPhone(VS.p1, 'PRIMER TURNO');
+  }
+}
+
+function showPassPhone(profile, subtitle) {
+  document.getElementById('passPhoneTitle').textContent = subtitle || 'PASA EL TELÉFONO';
+  document.getElementById('passPhoneName').textContent = profile.name;
+  const avatarEl = document.getElementById('passPhoneAvatar');
+  avatarEl.innerHTML = avatarHTML(profile, 64);
+  showScreen('passPhone');
+}
+
+function startVersusRound() {
+  if (VS.type === 'foto') {
+    const currentPlayer = VS.results.length === 0 ? VS.p1 : VS.p2;
+    const photo = getVsPhoto();
+    startVersusGame(currentPlayer, photo, 'foto');
+  } else {
+    const currentPlayer = VS.currentTurn === 0 ? VS.p1 : VS.p2;
+    const photos = (VS.currentTurn === 0 ? VS.p1 : VS.p2).photos || [];
+    const photo = photos[Math.floor(Math.random() * photos.length)];
+    startVersusGame(currentPlayer, photo, 'turnos');
+  }
+}
+
+function getVsPhoto() {
+  // Find photo in P1's album first, then P2
+  const allPhotos = [...(VS.p1?.photos||[]), ...(VS.p2?.photos||[])];
+  return allPhotos.find(p => p.id === VS.photoId) || allPhotos[0];
+}
+
+function startVersusGame(profile, photo, vsType) {
+  G = {
+    profile,
+    targetPct: 75,
+    photo: photo?.dataURL || '',
+    mode: 'free',
+    speed: 'normal',
+    level: 1,
+    lives: 3,
+    score: 0,
+    totalScore: 0,
+    timeLeft: null,
+    timerInterval: null,
+    isVersus: true,
+    vsType,
+  };
+  showScreen('gameScreen');
+  initCanvas();
+}
+
+// Called after a versus round ends (win or lose)
+function versusRoundEnd(pct, score) {
+  const currentPlayer = VS.type === 'foto'
+    ? (VS.results.length === 0 ? VS.p1 : VS.p2)
+    : (VS.currentTurn === 0 ? VS.p1 : VS.p2);
+
+  VS.results.push({ profile: currentPlayer, pct, score });
+
+  if (VS.type === 'foto') {
+    if (VS.results.length < 2) {
+      // P2's turn
+      showPassPhone(VS.p2, 'TURNO DEL RIVAL');
+    } else {
+      showVersusResult();
+    }
+  } else {
+    // Turnos: alternate until both have played once → show result
+    VS.turnoScores[VS.currentTurn] += score;
+    VS.currentTurn = VS.currentTurn === 0 ? 1 : 0;
+    if (VS.results.length < 2) {
+      const nextPlayer = VS.currentTurn === 0 ? VS.p1 : VS.p2;
+      showPassPhone(nextPlayer, 'PASA EL TELÉFONO');
+    } else {
+      showVersusResult();
+    }
+  }
+}
+
+function showVersusResult() {
+  const [r1, r2] = VS.results;
+  const winner = r1.score >= r2.score ? r1 : r2;
+  const isDraw = r1.score === r2.score;
+
+  document.getElementById('vrWinnerName').textContent = isDraw ? '¡EMPATE!' : winner.profile.name;
+  document.getElementById('vrWinnerSub').textContent = isDraw ? 'NADIE GANA… O GANAN TODOS' : '🏆 GANADOR';
+
+  const cards = document.getElementById('vrCards');
+  cards.innerHTML = '';
+  [r1, r2].forEach(r => {
+    const isWinner = !isDraw && r.profile.id === winner.profile.id;
+    const card = document.createElement('div');
+    card.className = 'vr-card' + (isWinner ? ' winner' : '');
+    card.innerHTML = `
+      ${avatarHTML(r.profile, 48)}
+      <div class="vr-card-name">${r.profile.name}</div>
+      <div class="vr-card-pct" style="color:${isWinner?'var(--yellow)':'var(--muted)'}">${r.pct}%</div>
+      <div class="vr-card-score">${r.score.toLocaleString()} pts</div>
+      ${isWinner ? '<div style="font-size:18px;">🏆</div>' : ''}
+    `;
+    cards.appendChild(card);
+  });
+
+  showScreen('versusResult');
+
+  // Save scores
+  VS.results.forEach(r => {
+    dbPut('scores', {
+      name: r.profile.name, score: r.score, level: 1,
+      mode: 'versus_' + VS.type, date: new Date().toISOString(),
+      profileId: r.profile.id,
+    });
+  });
+}
 
 // ─ BOOT ─
 openDB().then(()=>initApp());
