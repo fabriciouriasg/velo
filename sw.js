@@ -1,7 +1,6 @@
-const CACHE = 'velo-v3';
-const BASE = '/Velo/';
+const CACHE = 'velo-v4';
+const BASE = '/velo/';
 
-// Al instalar: cachea los assets principales
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(c => c.addAll([
@@ -15,7 +14,6 @@ self.addEventListener('install', e => {
   );
 });
 
-// Al activar: borra caches viejos
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
@@ -24,12 +22,10 @@ self.addEventListener('activate', e => {
   );
 });
 
-// Fetch: red primero, caché como fallback
 self.addEventListener('fetch', e => {
   e.respondWith(
     fetch(e.request)
       .then(res => {
-        // Guarda copia fresca en caché
         const clone = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, clone));
         return res;
