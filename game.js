@@ -834,7 +834,13 @@ function draw(){
     ctx.beginPath();
     for(let y=0;y<gridH;y++) for(let x=0;x<gridW;x++) if(grid[y*gridW+x]===1) ctx.rect(x*CELL,y*CELL,CELL,CELL);
     ctx.clip();
-    ctx.drawImage(gameImg,0,0,canvas.width,canvas.height);
+    // object-fit: cover — mantiene proporción y llena el canvas
+    const iw = gameImg.naturalWidth, ih = gameImg.naturalHeight;
+    const cw = canvas.width, ch = canvas.height;
+    const scale = Math.max(cw/iw, ch/ih);
+    const sw = iw*scale, sh = ih*scale;
+    const sx = (cw - sw) / 2, sy = (ch - sh) / 2;
+    ctx.drawImage(gameImg, sx, sy, sw, sh);
     ctx.restore();
   }
 

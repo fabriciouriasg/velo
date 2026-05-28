@@ -1,12 +1,21 @@
-const CACHE = 'velo-v1';
-const ASSETS = ['/', '/index.html', '/game.js', '/manifest.json'];
+const CACHE = 'velo-v3';
+const BASE = '/Velo/';
 
+// Al instalar: cachea los assets principales
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE).then(c => c.addAll([
+      BASE,
+      BASE + 'index.html',
+      BASE + 'game.js',
+      BASE + 'manifest.json',
+      BASE + 'icon-192.png',
+      BASE + 'icon-512.png',
+    ])).then(() => self.skipWaiting())
   );
 });
 
+// Al activar: borra caches viejos
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys().then(keys =>
@@ -15,10 +24,16 @@ self.addEventListener('activate', e => {
   );
 });
 
+// Fetch: red primero, caché como fallback
 self.addEventListener('fetch', e => {
   e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request).catch(() =>
-      caches.match('/index.html')
-    ))
+    fetch(e.request)
+      .then(res => {
+        // Guarda copia fresca en caché
+        const clone = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, clone));
+        return res;
+      })
+      .catch(() => caches.match(e.request))
   );
 });
