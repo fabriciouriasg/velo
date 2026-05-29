@@ -27,7 +27,7 @@
   --muted:  rgba(255,255,255,0.4);
 }
 *{ margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-body{ background:var(--bg); color:var(--text); font-family:'Share Tech Mono',monospace; height:100dvh; overflow:hidden; }
+body{ background:var(--bg); color:var(--text); font-family:'Share Tech Mono',monospace; height:100dvh; overflow:hidden; transition:opacity 0.18s ease; }
 .screen{ display:none; width:100%; height:100dvh; flex-direction:column; align-items:center; overflow-y:auto; }
 .screen.active{ display:flex; }
 
@@ -471,6 +471,7 @@ input[type=file]{ display:none; }
     <button class="home-btn hb-scores" onclick="showScreen('scoresScreen')">🏆 TOP GLOBAL</button>
     <button class="home-btn hb-switch" onclick="showScreen('profileSelect')">⇄ CAMBIAR PERFIL</button>
     <button class="home-btn" onclick="showScreen('photoManage')" style="background:transparent;border:1px solid var(--border);border-style:solid;color:var(--muted);font-size:10px;">📷 MIS FOTOS</button>
+    <button class="home-btn" onclick="showScreen('statsScreen')" style="background:transparent;border:1px solid var(--border);border-style:solid;color:var(--muted);font-size:10px;">📊 MIS STATS</button>
   </div>
 </div>
 
@@ -709,6 +710,52 @@ input[type=file]{ display:none; }
     <div style="width:100%;max-width:360px;display:flex;flex-direction:column;gap:8px;">
       <button class="btn-primary" onclick="startVersus()">REVANCHA ⚔</button>
       <button class="btn-secondary" onclick="showScreen('homeScreen')">MENÚ PRINCIPAL</button>
+    </div>
+  </div>
+</div>
+
+<!-- STATS -->
+<div id="statsScreen" class="screen">
+  <div class="scores-header">
+    <button class="back-btn" onclick="showScreen('homeScreen')">←</button>
+    <div class="album-header-title">Mis Estadísticas</div>
+  </div>
+  <div class="scores-body" style="display:flex;flex-direction:column;gap:16px;padding:16px;">
+    <!-- Key numbers -->
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;max-width:400px;width:100%;margin:0 auto;">
+      <div style="background:var(--panel);border-radius:8px;padding:14px;text-align:center;">
+        <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:4px;">PARTIDAS</div>
+        <div style="font-family:'Orbitron',sans-serif;font-size:22px;color:var(--cyan);" id="statPlayed">0</div>
+      </div>
+      <div style="background:var(--panel);border-radius:8px;padding:14px;text-align:center;">
+        <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:4px;">NV. MÁX</div>
+        <div style="font-family:'Orbitron',sans-serif;font-size:22px;color:var(--yellow);" id="statMaxLv">1</div>
+      </div>
+      <div style="background:var(--panel);border-radius:8px;padding:14px;text-align:center;">
+        <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:4px;">MEJOR SCORE</div>
+        <div style="font-family:'Orbitron',sans-serif;font-size:16px;color:var(--white);" id="statBest">0</div>
+      </div>
+      <div style="background:var(--panel);border-radius:8px;padding:14px;text-align:center;">
+        <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:4px;">% PROMEDIO</div>
+        <div style="font-family:'Orbitron',sans-serif;font-size:22px;color:var(--orange);" id="statAvgPct">0%</div>
+      </div>
+    </div>
+    <!-- Progress chart -->
+    <div style="background:var(--panel);border-radius:8px;padding:14px;max-width:400px;width:100%;margin:0 auto;">
+      <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:10px;">PROGRESO DE PUNTAJE</div>
+      <canvas id="statsChart" style="width:100%;height:80px;display:block;"></canvas>
+    </div>
+    <!-- Mode breakdown -->
+    <div style="background:var(--panel);border-radius:8px;padding:14px;max-width:400px;width:100%;margin:0 auto;">
+      <div style="font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:10px;">POR MODO</div>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr>
+          <th style="font-size:8px;color:var(--muted);text-align:left;padding:4px;">MODO</th>
+          <th style="font-size:8px;color:var(--muted);text-align:right;padding:4px;">PARTIDAS</th>
+          <th style="font-size:8px;color:var(--muted);text-align:right;padding:4px;">MEJOR</th>
+        </tr></thead>
+        <tbody id="statsBody"></tbody>
+      </table>
     </div>
   </div>
 </div>
