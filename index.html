@@ -259,8 +259,80 @@ input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:20px; he
 .setup-footer{ padding:16px; width:100%; max-width:400px; margin:0 auto; }
 
 /* ── GAME ── */
-#gameScreen{ padding:0; position:relative; }
-#gameCanvas{ display:block; touch-action:none; }
+#gameScreen{ 
+  padding:0; 
+  position:relative; 
+  overflow:hidden;
+  background:#000;
+}
+#gamePhoto{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  object-position:center;
+  z-index:1;
+  display:block;
+}
+#gameCanvas{ 
+  position:absolute;
+  inset:0;
+  width:100% !important;
+  height:100% !important;
+  z-index:2;
+  display:block; 
+  touch-action:none;
+  background:transparent;
+}
+.game-hud{
+  position:absolute;
+  top:0; left:0; right:0;
+  z-index:5;
+}
+.swipe-hint{
+  position:absolute;
+  bottom:24px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:5;
+  font-size:9px;
+  letter-spacing:3px;
+  color:rgba(255,255,255,0.2);
+  text-transform:uppercase;
+  pointer-events:none;
+  transition:opacity 1s;
+}
+.pause-btn{
+  position:absolute;
+  bottom:16px;
+  right:16px;
+  z-index:5;
+  width:36px;
+  height:36px;
+  background:rgba(26,59,139,0.8);
+  border:1px solid rgba(0,163,224,0.3);
+  border-radius:8px;
+  color:#fff;
+  font-size:16px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.overlay{
+  position:absolute;
+  inset:0;
+  z-index:10;
+  display:none;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  background:rgba(20,20,28,0.93);
+  gap:16px;
+  padding:28px 24px;
+}
+.overlay.active{ display:flex; }
 .game-hud{
   position:absolute; top:0; left:0; right:0;
   display:flex; justify-content:space-between; align-items:center;
@@ -300,12 +372,7 @@ input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:20px; he
   font-size:9px; letter-spacing:3px; color:rgba(255,255,255,0.2);
   z-index:10; text-transform:uppercase; pointer-events:none; transition:opacity 1s;
 }
-.pause-btn{ position:absolute; bottom:16px; right:16px; z-index:10;
-  position:absolute; bottom:16px; right:16px; width:36px; height:36px;
-  background:rgba(26,59,139,0.8); border:1px solid rgba(0,163,224,0.3);
-  border-radius:8px; color:var(--white); font-size:16px; cursor:pointer;
-  display:flex; align-items:center; justify-content:center; z-index:10;
-}
+/* pause-btn defined in #gameScreen block */
 
 /* ── SCORES ── */
 #scoresScreen{ padding:0; }
@@ -550,19 +617,9 @@ input[type=file]{ display:none; }
 </div>
 
 <!-- GAME -->
-<div id="gameScreen" class="screen" style="position:relative;overflow:hidden;">
-  <!-- Native photo layer — z-index 1, sits below canvas veil -->
-  <img id="gamePhoto" style="
-    position:absolute;
-    top:0;left:0;
-    width:100%;
-    height:100%;
-    object-fit:cover;
-    object-position:center;
-    z-index:1;
-  " src="" alt="">
-  <!-- HUD always on top -->
-  <div class="game-hud" style="position:absolute;top:0;left:0;right:0;z-index:10;">
+<div id="gameScreen" class="screen">
+  <img id="gamePhoto" src="" alt="">
+  <div class="game-hud">
     <div class="hud-item" id="hudAvatarWrap"></div>
     <div class="hud-item"><div class="hud-label">Score</div><div class="hud-value" id="hudScore">0</div></div>
     <div class="hud-item"><div class="hud-label">Cap.</div><div class="hud-value" id="hudPct">0%</div></div>
