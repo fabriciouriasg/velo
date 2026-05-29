@@ -21,6 +21,11 @@ const CELL           = 8;
 const HUD_H          = 44;
 
 // ═══════════════════════════════════════════
+//  UTILS (defined early — used by initApp)
+// ═══════════════════════════════════════════
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ═══════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════
 let db;
@@ -105,7 +110,6 @@ async function initApp() {
   }
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ═══════════════════════════════════════════
 //  PROFILE SELECT
