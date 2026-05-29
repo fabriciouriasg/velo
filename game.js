@@ -66,7 +66,7 @@ function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   if (id === 'homeScreen')    renderHome();
-  if (id === 'albumScreen')   renderAlbum();
+  if (id === 'albumScreen')   renderAlbumPreview();
   if (id === 'scoresScreen')  renderScores();
   if (id === 'photoManage')   renderManage();
   if (id === 'profileSelect') renderProfileSelect();
@@ -369,6 +369,54 @@ function renderHome() {
 // ═══════════════════════════════════════════
 function getPhotos() { return activeProfile?.photos || []; }
 
+
+// ── ALBUM PREVIEW — read-only, random photo auto-selected ──
+function renderAlbumPreview() {
+  if (!activeProfile) return;
+  const photos = getPhotos();
+  if (photos.length === 0) {
+    showScreen('photoManage');
+    return;
+  }
+  // Pick random photo
+  const random = photos[Math.floor(Math.random() * photos.length)];
+  selectedPhotoId = random.id;
+
+  const grid = document.getElementById('albumGrid');
+  const countEl = document.getElementById('albumCount');
+  const playBtn = document.getElementById('albumPlayBtn');
+  grid.innerHTML = '';
+  countEl.textContent = `${photos.length}/${MAX_PHOTOS}`;
+
+  photos.forEach(p => {
+    const wrap = document.createElement('div');
+    wrap.className = 'album-thumb-wrap';
+    const img = document.createElement('img');
+    // Highlight the randomly selected one, rest are dimmed
+    img.className = 'album-thumb';
+    img.src = p.dataURL;
+    img.style.opacity = p.id === random.id ? '1' : '0.35';
+    img.style.cursor = 'default';
+    if (p.id === random.id) {
+      img.style.border = '2px solid var(--cyan)';
+      img.style.boxShadow = '0 0 10px var(--cyan)';
+    }
+    wrap.appendChild(img);
+    grid.appendChild(wrap);
+  });
+
+  // Show "random" badge on play button
+  playBtn.disabled = false;
+  playBtn.textContent = '🎲 FOTO ALEATORIA — JUGAR';
+
+  // Auto-advance to setup after brief preview (1.2s)
+  setTimeout(() => {
+    if (document.getElementById('albumScreen').classList.contains('active')) {
+      goToSetup();
+    }
+  }, 1200);
+}
+
 function renderAlbum() {
   if (!activeProfile) return;
   const photos = getPhotos();
@@ -507,6 +555,9 @@ function startGame() {
     totalScore: 0,
     timeLeft:   setupMode !== 'free' ? parseInt(setupMode) : null,
     timerInterval: null,
+    speedBoost: 1.0,
+    lastSpeedTick: 0,
+    lastPctBoost: 0,
   };
   showScreen('gameScreen');
   initCanvas();
@@ -688,7 +739,11 @@ function setupSwipe() {
   }, {passive:false});
 }
 
-function setDir(dx,dy){ player.dx=dx; player.dy=dy; player.moving=true; }
+function setDir(dx,dy){
+  // Ignore exact opposite direction while moving to prevent trail self-collision
+  if(player.moving && player.dx===-dx && player.dy===-dy && (dx!==0||dy!==0)) return;
+  player.dx=dx; player.dy=dy; player.moving=true;
+}
 window.addEventListener('keydown', e => {
   const m={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
   if(m[e.key]){setDir(...m[e.key]);e.preventDefault();}
@@ -742,17 +797,10 @@ function movePlayer() {
   }
 }
 
-function fillRegion() {
-  trail.forEach(t=>setCell(t.x,t.y,2));
+function floodFill(seedCells) {
   const mark = new Uint8Array(gridW*gridH).fill(0);
-  const queue = [];
-  enemies.forEach(en => {
-    const ex=Math.floor(en.x/CELL), ey=Math.floor(en.y/CELL);
-    const idx=ey*gridW+ex;
-    if(ex>=0&&ex<gridW&&ey>=0&&ey<gridH&&grid[idx]===0&&!mark[idx]){
-      mark[idx]=1; queue.push({x:ex,y:ey});
-    }
-  });
+  const queue = [...seedCells];
+  queue.forEach(s=>{ if(grid[s.y*gridW+s.x]===0) mark[s.y*gridW+s.x]=1; });
   while(queue.length){
     const{x,y}=queue.pop();
     for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){
@@ -763,10 +811,96 @@ function fillRegion() {
       mark[i]=1; queue.push({x:nx,y:ny});
     }
   }
+  return mark;
+}
+
+function fillRegion() {
+  trail.forEach(t=>setCell(t.x,t.y,2));
+
+  // Flood fill from enemies side
+  const enemySeeds = enemies.map(en=>({x:Math.floor(en.x/CELL),y:Math.floor(en.y/CELL)}))
+    .filter(s=>s.x>=0&&s.x<gridW&&s.y>=0&&s.y<gridH&&grid[s.y*gridW+s.x]===0);
+  const enemyMark = floodFill(enemySeeds);
+
+  // Count both regions
+  let enemySide=0, freeSide=0;
+  for(let i=0;i<grid.length;i++){
+    if(grid[i]!==0) continue;
+    if(enemyMark[i]) enemySide++; else freeSide++;
+  }
+
+  // Fill the SMALLER region
+  let fillMark, enemyTrapped=false;
+  if(freeSide <= enemySide){
+    // Fill the free side (smaller) — enemies are NOT in it
+    fillMark = new Uint8Array(gridW*gridH).fill(0);
+    for(let i=0;i<grid.length;i++) if(grid[i]===0&&!enemyMark[i]) fillMark[i]=1;
+  } else {
+    // Fill the enemy side (smaller) — enemies ARE trapped!
+    fillMark = enemyMark;
+    enemyTrapped = true;
+  }
+
   let cells=0;
-  for(let i=0;i<grid.length;i++) if(grid[i]===0&&!mark[i]){grid[i]=1;cells++;}
-  const pts = cells*10*G.level;
+  for(let i=0;i<grid.length;i++) if(fillMark[i]&&grid[i]===0){grid[i]=1;cells++;}
+
+  // Bonus points + enemy escape if trapped
+  let bonus = 0;
+  if(enemyTrapped){
+    bonus = cells * 25 * G.level; // extra bonus for trapping
+    // Escape: teleport each trapped enemy to nearest free cell
+    enemies.forEach(en=>{
+      const ex=Math.floor(en.x/CELL), ey=Math.floor(en.y/CELL);
+      if(grid[ey*gridW+ex]!==0){
+        const free=findNearestFreeCell(ex,ey);
+        if(free){ en.x=free.x*CELL+CELL/2; en.y=free.y*CELL+CELL/2; }
+      }
+    });
+    // Visual feedback
+    showBonusText('+TRAMPA! x2.5');
+  }
+
+  const pts = cells*10*G.level + bonus;
   G.score+=pts; G.totalScore+=pts;
+}
+
+
+function findNearestSafeSpawn(cx,cy){
+  // Find nearest border (grid===2) or captured (grid===1) cell to respawn on
+  let best=null, bestDist=999999;
+  for(let y=0;y<gridH;y++){
+    for(let x=0;x<gridW;x++){
+      const v=grid[y*gridW+x];
+      if(v===2||(v===1&&(x===0||x===gridW-1||y===0||y===gridH-1))){
+        const d=Math.abs(x-cx)+Math.abs(y-cy);
+        if(d<bestDist){bestDist=d;best={x,y};}
+      }
+    }
+  }
+  return best||{x:1,y:0};
+}
+function findNearestFreeCell(cx,cy){
+  // BFS to find nearest cell with grid===0
+  const visited=new Uint8Array(gridW*gridH).fill(0);
+  const q=[{x:cx,y:cy}];
+  visited[cy*gridW+cx]=1;
+  while(q.length){
+    const{x,y}=q.shift();
+    if(grid[y*gridW+x]===0) return{x,y};
+    for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx=x+dx,ny=y+dy;
+      if(nx<0||nx>=gridW||ny<0||ny>=gridH) continue;
+      const i=ny*gridW+nx;
+      if(visited[i]) continue;
+      visited[i]=1; q.push({x:nx,y:ny});
+    }
+  }
+  return null;
+}
+
+let bonusText=null, bonusTimer=0;
+function showBonusText(txt){
+  bonusText=txt; bonusTimer=90;
 }
 
 function getCapturedPct(){
@@ -794,16 +928,72 @@ function checkWin(){
 
 function moveEnemies(dt){
   const spd=dt/16;
+
+  // Gradual speed increase — by time and by capture progress
+  if(!G.speedBoost) G.speedBoost=1.0;
+  if(!G.lastSpeedTick) G.lastSpeedTick=0;
+  G.lastSpeedTick+=dt;
+  if(G.lastSpeedTick>=45000){ // every 45 seconds
+    G.speedBoost=Math.min(G.speedBoost+0.03, 1.25);
+    G.lastSpeedTick=0;
+  }
+  const pct=getCapturedPct();
+  if(!G.lastPctBoost) G.lastPctBoost=0;
+  const pctStep=Math.floor(pct/20); // every 20% captured
+  if(pctStep>G.lastPctBoost){
+    G.speedBoost=Math.min(G.speedBoost+0.02, 1.25);
+    G.lastPctBoost=pctStep;
+  }
+
   enemies.forEach(en=>{
-    en.x+=en.vx*spd; en.y+=en.vy*spd; en.angle+=0.05;
+    const boost=G.speedBoost||1.0;
+    en.x+=en.vx*spd*boost;
+    en.y+=en.vy*spd*boost;
+    en.angle+=0.05;
     if(en.hitCooldown>0) en.hitCooldown--;
-    const hw=en.size*0.6;
-    const gxL=Math.floor((en.x-hw)/CELL), gxR=Math.floor((en.x+hw)/CELL);
-    const gyT=Math.floor((en.y-hw)/CELL), gyB=Math.floor((en.y+hw)/CELL);
-    if([getCell(gxR,Math.floor(en.y/CELL)),getCell(gxL,Math.floor(en.y/CELL))].some(c=>c===1||c===2||c<0)){en.vx*=-1;en.x+=en.vx*spd*3;}
-    if([getCell(Math.floor(en.x/CELL),gyB),getCell(Math.floor(en.x/CELL),gyT)].some(c=>c===1||c===2||c<0)){en.vy*=-1;en.y+=en.vy*spd*3;}
-    en.x=Math.max(CELL,Math.min((gridW-2)*CELL,en.x));
-    en.y=Math.max(CELL,Math.min((gridH-2)*CELL,en.y));
+
+    // Track stuck detection
+    if(!en.lastX) en.lastX=en.x;
+    if(!en.lastY) en.lastY=en.y;
+    if(!en.stuckTimer) en.stuckTimer=0;
+    const moved=Math.abs(en.x-en.lastX)+Math.abs(en.y-en.lastY);
+    if(moved<0.5) en.stuckTimer+=dt; else en.stuckTimer=0;
+    en.lastX=en.x; en.lastY=en.y;
+
+    // Emergency unstick — if stuck for >500ms, randomize velocity
+    if(en.stuckTimer>500){
+      en.vx=(Math.random()<0.5?1:-1)*Math.abs(en.vx||1.5);
+      en.vy=(Math.random()<0.5?1:-1)*Math.abs(en.vy||1.5);
+      en.stuckTimer=0;
+      const free=findNearestFreeCell(Math.floor(en.x/CELL),Math.floor(en.y/CELL));
+      if(free){en.x=free.x*CELL+CELL/2;en.y=free.y*CELL+CELL/2;}
+    }
+
+    const hw=en.size*0.7;
+
+    // X bounce — check left and right separately
+    const hitR=getCell(Math.floor((en.x+hw)/CELL),Math.floor(en.y/CELL));
+    const hitL=getCell(Math.floor((en.x-hw)/CELL),Math.floor(en.y/CELL));
+    if((hitR===1||hitR===2||hitR<0)&&en.vx>0){en.vx*=-1;en.x-=hw*0.2;}
+    if((hitL===1||hitL===2||hitL<0)&&en.vx<0){en.vx*=-1;en.x+=hw*0.2;}
+
+    // Y bounce — check top and bottom separately
+    const hitB=getCell(Math.floor(en.x/CELL),Math.floor((en.y+hw)/CELL));
+    const hitT=getCell(Math.floor(en.x/CELL),Math.floor((en.y-hw)/CELL));
+    if((hitB===1||hitB===2||hitB<0)&&en.vy>0){en.vy*=-1;en.y-=hw*0.2;}
+    if((hitT===1||hitT===2||hitT<0)&&en.vy<0){en.vy*=-1;en.y+=hw*0.2;}
+
+    // Hard clamp
+    en.x=Math.max(CELL+hw,Math.min((gridW-1)*CELL-hw,en.x));
+    en.y=Math.max(CELL+hw,Math.min((gridH-1)*CELL-hw,en.y));
+
+    // Ensure enemy is in free cell — push out if in captured zone
+    const gx=Math.floor(en.x/CELL),gy=Math.floor(en.y/CELL);
+    if(grid[gy*gridW+gx]!==0){
+      const free=findNearestFreeCell(gx,gy);
+      if(free){en.x=free.x*CELL+CELL/2;en.y=free.y*CELL+CELL/2;}
+    }
+
     if(en.hitCooldown===0) checkEnemyHit(en);
   });
 }
@@ -820,8 +1010,19 @@ function checkEnemyHit(en){
 function loseLife(){
   trail.forEach(t=>{if(getCell(t.x,t.y)===3)setCell(t.x,t.y,0);});
   trail=[]; isDrawing=false;
-  player.gx=1; player.gy=0; player.moving=false; player.dx=0; player.dy=0;
-  enemies.forEach(en=>en.hitCooldown=90);
+  player.moving=false; player.dx=0; player.dy=0;
+  // Respawn at nearest safe border/captured cell
+  const spawn=findNearestSafeSpawn(player.gx,player.gy);
+  player.gx=spawn.x; player.gy=spawn.y;
+  enemies.forEach(en=>{
+    en.hitCooldown=90;
+    // Push enemies out of captured zones
+    const gx=Math.floor(en.x/CELL),gy=Math.floor(en.y/CELL);
+    if(grid[gy*gridW+gx]!==0){
+      const free=findNearestFreeCell(gx,gy);
+      if(free){en.x=free.x*CELL+CELL/2;en.y=free.y*CELL+CELL/2;}
+    }
+  });
   G.lives--;
   if(G.lives<=0){
     cancelAnimationFrame(animId);
@@ -855,9 +1056,9 @@ function draw(){
   }
 
   const trailCol = G.profile?.trailColor || '#FCD116';
-  // Border cells
-  ctx.fillStyle = 'rgba(0,163,224,0.75)';
-  for(let y=0;y<gridH;y++) for(let x=0;x<gridW;x++) if(grid[y*gridW+x]===2) ctx.fillRect(x*CELL+1,y*CELL+1,CELL-2,CELL-2);
+  // Border cells — invisible, just 1px subtle line
+  ctx.fillStyle = 'rgba(0,163,224,0.12)';
+  for(let y=0;y<gridH;y++) for(let x=0;x<gridW;x++) if(grid[y*gridW+x]===2) ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
 
   // Trail
   if(trail.length>1){
@@ -870,6 +1071,22 @@ function draw(){
 
   enemies.forEach(drawEnemy);
   drawPlayer();
+
+  // Bonus text
+  if(bonusText&&bonusTimer>0){
+    bonusTimer--;
+    const alpha=Math.min(1,bonusTimer/20);
+    ctx.save();
+    ctx.globalAlpha=alpha;
+    ctx.font='bold 18px Orbitron,sans-serif';
+    ctx.fillStyle='#FCD116';
+    ctx.textAlign='center';
+    ctx.shadowColor='#FCD116';
+    ctx.shadowBlur=10;
+    ctx.fillText(bonusText, canvas.width/2, canvas.height/2-40);
+    ctx.restore();
+    if(bonusTimer<=0) bonusText=null;
+  }
 }
 
 function drawPlayer(){
