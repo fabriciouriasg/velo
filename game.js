@@ -69,13 +69,20 @@ function genId() { return Date.now().toString(36) + Math.random().toString(36).s
 //  NAVIGATION
 // ═══════════════════════════════════════════
 function showScreen(id) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+  // Fade transition
+  document.body.style.transition='opacity 0.18s ease';
+  document.body.style.opacity='0';
+  setTimeout(()=>{
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    document.body.style.opacity='1';
+  },180);
   if (id === 'homeScreen')    renderHome();
   if (id === 'albumScreen')   renderAlbumPreview();
   if (id === 'scoresScreen')  renderScores();
   if (id === 'photoManage')   renderManage();
   if (id === 'profileSelect') renderProfileSelect();
+  if (id === 'statsScreen')   setTimeout(renderStats,50);
 }
 
 // ═══════════════════════════════════════════
@@ -591,6 +598,7 @@ function startGame() {
     speedBoost: 1.0,
     lastSpeedTick: 0,
     lastPctBoost: 0,
+    nextPowerupIn: 25000+Math.random()*15000,
   };
   showScreen('gameScreen');
   initCanvas();
@@ -638,14 +646,9 @@ async function saveAndMenu() {
     profileId: activeProfile.id,
   };
   await dbPut('scores', score);
-  // Update profile stats
   activeProfile.totalScore = Math.max(activeProfile.totalScore || 0, G.totalScore);
   activeProfile.level = Math.max(activeProfile.level || 1, G.level);
-  activeProfile.stats = activeProfile.stats || {};
-  activeProfile.stats.played = (activeProfile.stats.played || 0) + 1;
-  activeProfile.stats.maxLevel = Math.max(activeProfile.stats.maxLevel || 1, G.level);
-  await dbPut('profiles', activeProfile);
-  profiles = await dbAll('profiles');
+  await saveGameStats(G.lastPct||0);
   endGame();
 }
 
@@ -691,8 +694,24 @@ function initCanvas() {
   const numEnemies  = Math.min(1 + Math.floor((G.level-1)/2), 5);
   const speedMult   = 1 + (G.level-1) * 0.05;
   const eColors = ['#FF006E','#FF4D00','#CC00FF','#FF9500','#00FF9F'];
+
+  // Behavior by level:
+  // 1-3: bounce only
+  // 4-6: bounce + 1 chaser
+  // 7-9: bounce + chaser + 1 erratic
+  // 10-12: bounce + chaser + erratic + 1 repairer
+  // 13+: all behaviors, max speed
+  const getBehavior = (i, level) => {
+    if (level <= 3) return 'bounce';
+    if (level <= 6) return i === 1 ? 'chase' : 'bounce';
+    if (level <= 9) return i === 1 ? 'chase' : i === 2 ? 'erratic' : 'bounce';
+    if (level <= 12) return i === 1 ? 'chase' : i === 2 ? 'erratic' : i === 3 ? 'repair' : 'bounce';
+    return ['bounce','chase','erratic','repair','bounce'][i % 5];
+  };
+
   enemies = [];
   for (let i = 0; i < numEnemies; i++) {
+    const behavior = getBehavior(i, G.level);
     enemies.push({
       x: (3 + Math.floor(Math.random()*(gridW-6)))*CELL,
       y: (3 + Math.floor(Math.random()*(gridH-6)))*CELL,
@@ -700,6 +719,7 @@ function initCanvas() {
       vy: (Math.random()<0.5?1:-1)*(1.4+Math.random()*0.8)*speedMult,
       size:10, angle:Math.random()*Math.PI*2,
       color:eColors[i%eColors.length], hitCooldown:0,
+      behavior, erraticTimer:0, repairTimer:0,
     });
   }
 
@@ -745,6 +765,7 @@ function initCanvas() {
   };
   gameImg.src = G.photo;
 
+  activePowerup=null; powerupEffect=null; powerupSpawnTimer=0;
   document.getElementById('winOverlay').classList.remove('active');
   document.getElementById('loseOverlay').classList.remove('active');
   document.getElementById('pauseOverlay').classList.remove('active');
@@ -829,8 +850,14 @@ function gameLoop(ts) {
   const dt = lastTime ? ts - lastTime : 16;
   lastTime = ts;
   tickAcc += dt;
-  moveEnemies(dt);
-  const tickMs = SPEED_MAP[G.speed] || 55;
+  if(!paused){
+    moveEnemies(dt);
+    updatePowerups(dt);
+    updateRevealFades(dt);
+    updateParticles(dt);
+  }
+  const baseMs = SPEED_MAP[G.speed] || 55;
+  const tickMs = isPowerupSpeed() ? Math.floor(baseMs/2) : baseMs;
   if (tickAcc >= tickMs) { tickAcc -= tickMs; if(player.moving) movePlayer(); }
   draw();
   updateHUD();
@@ -916,7 +943,12 @@ function fillRegion() {
   }
 
   let cells=0;
-  for(let i=0;i<grid.length;i++) if(fillMark[i]&&grid[i]===0){grid[i]=1;cells++;}
+  const newlyCaptured=[];
+  for(let i=0;i<grid.length;i++) if(fillMark[i]&&grid[i]===0){
+    grid[i]=1;cells++;
+    newlyCaptured.push({x:i%gridW,y:Math.floor(i/gridW)});
+  }
+  addRevealFade(newlyCaptured);
 
   // Bonus points + enemy escape if trapped
   let bonus = 0;
@@ -936,6 +968,14 @@ function fillRegion() {
 
   const pts = cells*10*G.level + bonus;
   G.score+=pts; G.totalScore+=pts;
+
+  // Spawn particles at centroid of captured zone
+  if(newlyCaptured.length>0){
+    const cx=newlyCaptured.reduce((s,c)=>s+c.x,0)/newlyCaptured.length*CELL;
+    const cy=newlyCaptured.reduce((s,c)=>s+c.y,0)/newlyCaptured.length*CELL;
+    const trailCol=G.profile?.trailColor||'#FCD116';
+    spawnParticles(cx,cy,trailCol,Math.min(newlyCaptured.length,20));
+  }
 }
 
 
@@ -995,46 +1035,98 @@ function checkWin(){
     document.getElementById('winPct').textContent=pct+'%';
     document.getElementById('winScore').textContent=G.score.toLocaleString();
     document.getElementById('winTotal').textContent=G.totalScore.toLocaleString();
-    document.getElementById('winOverlay').classList.add('active');
-    dbPut('scores',{name:activeProfile.name,score:G.totalScore,level:G.level,mode:G.mode,date:new Date().toISOString(),profileId:activeProfile.id});
+    // Show photo as win overlay background
+    const winOv=document.getElementById('winOverlay');
+    winOv.style.backgroundImage=`url(${G.photo})`;
+    winOv.style.backgroundSize='cover';
+    winOv.style.backgroundPosition='center';
+    winOv.classList.add('active');
+    G.lastPct=pct;
+    dbPut('scores',{name:activeProfile.name,score:G.totalScore,level:G.level,pct,mode:G.mode,date:new Date().toISOString(),profileId:activeProfile.id});
   }
 }
 
 function moveEnemies(dt){
   const spd=dt/16;
 
-  // Gradual speed increase — by time and by capture progress
+  // Gradual speed boost
   if(!G.speedBoost) G.speedBoost=1.0;
   if(!G.lastSpeedTick) G.lastSpeedTick=0;
   G.lastSpeedTick+=dt;
-  if(G.lastSpeedTick>=45000){ // every 45 seconds
-    G.speedBoost=Math.min(G.speedBoost+0.03, 1.25);
-    G.lastSpeedTick=0;
-  }
+  if(G.lastSpeedTick>=45000){ G.speedBoost=Math.min(G.speedBoost+0.03,1.25); G.lastSpeedTick=0; }
   const pct=getCapturedPct();
   if(!G.lastPctBoost) G.lastPctBoost=0;
-  const pctStep=Math.floor(pct/20); // every 20% captured
-  if(pctStep>G.lastPctBoost){
-    G.speedBoost=Math.min(G.speedBoost+0.02, 1.25);
-    G.lastPctBoost=pctStep;
-  }
+  const pctStep=Math.floor(pct/20);
+  if(pctStep>G.lastPctBoost){ G.speedBoost=Math.min(G.speedBoost+0.02,1.25); G.lastPctBoost=pctStep; }
+
+  const px=player.gx*CELL+CELL/2, py=player.gy*CELL+CELL/2;
 
   enemies.forEach(en=>{
     const boost=G.speedBoost||1.0;
-    en.x+=en.vx*spd*boost;
-    en.y+=en.vy*spd*boost;
     en.angle+=0.05;
     if(en.hitCooldown>0) en.hitCooldown--;
-
-    // Track stuck detection
-    if(!en.lastX) en.lastX=en.x;
-    if(!en.lastY) en.lastY=en.y;
     if(!en.stuckTimer) en.stuckTimer=0;
-    const moved=Math.abs(en.x-en.lastX)+Math.abs(en.y-en.lastY);
-    if(moved<0.5) en.stuckTimer+=dt; else en.stuckTimer=0;
-    en.lastX=en.x; en.lastY=en.y;
 
-    // Emergency unstick — if stuck for >500ms, randomize velocity
+    // ── BEHAVIOR ──
+    switch(en.behavior){
+      case 'chase': {
+        // Soft chase toward player — blend with current velocity
+        const dx=px-en.x, dy=py-en.y;
+        const dist=Math.hypot(dx,dy)||1;
+        const chaseStr=0.04;
+        en.vx+=(dx/dist)*chaseStr;
+        en.vy+=(dy/dist)*chaseStr;
+        // Cap speed
+        const spMax=2.5*boost;
+        const spCur=Math.hypot(en.vx,en.vy);
+        if(spCur>spMax){en.vx=en.vx/spCur*spMax;en.vy=en.vy/spCur*spMax;}
+        break;
+      }
+      case 'erratic': {
+        // Random direction change every 800-1500ms
+        en.erraticTimer=(en.erraticTimer||0)+dt;
+        if(en.erraticTimer>800+Math.random()*700){
+          en.vx=(Math.random()<0.5?1:-1)*(1.5+Math.random())*boost;
+          en.vy=(Math.random()<0.5?1:-1)*(1.5+Math.random())*boost;
+          en.erraticTimer=0;
+        }
+        break;
+      }
+      case 'repair': {
+        // Move toward nearest captured cell and "repair" it (uncapture)
+        en.repairTimer=(en.repairTimer||0)+dt;
+        if(en.repairTimer>2000){
+          en.repairTimer=0;
+          // Find nearest captured cell
+          const gx=Math.floor(en.x/CELL), gy=Math.floor(en.y/CELL);
+          let best=null, bestD=999;
+          for(let sy=Math.max(0,gy-8);sy<Math.min(gridH,gy+8);sy++){
+            for(let sx=Math.max(0,gx-8);sx<Math.min(gridW,gx+8);sx++){
+              if(grid[sy*gridW+sx]===1){
+                const d=Math.abs(sx-gx)+Math.abs(sy-gy);
+                if(d<bestD){bestD=d;best={x:sx,y:sy};}
+              }
+            }
+          }
+          if(best){
+            // Uncapture a small area around target
+            setCell(best.x,best.y,0);
+            showBonusText('⚠ REPARANDO!');
+          }
+        }
+        // Also do bounce movement
+        break;
+      }
+    }
+
+    en.x+=en.vx*spd*boost;
+    en.y+=en.vy*spd*boost;
+
+    // Stuck detection
+    if(!en.lastX){en.lastX=en.x;en.lastY=en.y;}
+    const moved=Math.abs(en.x-en.lastX)+Math.abs(en.y-en.lastY);
+    if(moved<0.3) en.stuckTimer+=dt; else en.stuckTimer=0;
+    en.lastX=en.x; en.lastY=en.y;
     if(en.stuckTimer>500){
       en.vx=(Math.random()<0.5?1:-1)*Math.abs(en.vx||1.5);
       en.vy=(Math.random()<0.5?1:-1)*Math.abs(en.vy||1.5);
@@ -1044,35 +1136,28 @@ function moveEnemies(dt){
     }
 
     const hw=en.size*0.7;
-
-    // X bounce — check left and right separately
     const hitR=getCell(Math.floor((en.x+hw)/CELL),Math.floor(en.y/CELL));
     const hitL=getCell(Math.floor((en.x-hw)/CELL),Math.floor(en.y/CELL));
     if((hitR===1||hitR===2||hitR<0)&&en.vx>0){en.vx*=-1;en.x-=hw*0.2;}
     if((hitL===1||hitL===2||hitL<0)&&en.vx<0){en.vx*=-1;en.x+=hw*0.2;}
-
-    // Y bounce — check top and bottom separately
     const hitB=getCell(Math.floor(en.x/CELL),Math.floor((en.y+hw)/CELL));
     const hitT=getCell(Math.floor(en.x/CELL),Math.floor((en.y-hw)/CELL));
     if((hitB===1||hitB===2||hitB<0)&&en.vy>0){en.vy*=-1;en.y-=hw*0.2;}
     if((hitT===1||hitT===2||hitT<0)&&en.vy<0){en.vy*=-1;en.y+=hw*0.2;}
-
-    // Hard clamp
     en.x=Math.max(CELL+hw,Math.min((gridW-1)*CELL-hw,en.x));
     en.y=Math.max(CELL+hw,Math.min((gridH-1)*CELL-hw,en.y));
 
-    // Ensure enemy is in free cell — push out if in captured zone
     const gx=Math.floor(en.x/CELL),gy=Math.floor(en.y/CELL);
     if(grid[gy*gridW+gx]!==0){
       const free=findNearestFreeCell(gx,gy);
       if(free){en.x=free.x*CELL+CELL/2;en.y=free.y*CELL+CELL/2;}
     }
-
     if(en.hitCooldown===0) checkEnemyHit(en);
   });
 }
 
 function checkEnemyHit(en){
+  if(isPowerupShield()) return; // shield active — immune
   if(isDrawing){
     const ex=Math.floor(en.x/CELL),ey=Math.floor(en.y/CELL);
     if(trail.some(t=>Math.abs(t.x-ex)<=1&&Math.abs(t.y-ey)<=1)){loseLife();return;}
@@ -1104,6 +1189,222 @@ function loseLife(){
     document.getElementById('loseScore').textContent=G.totalScore.toLocaleString();
     document.getElementById('loseLevel').textContent=G.level;
     document.getElementById('loseOverlay').classList.add('active');
+  }
+}
+
+
+
+
+// ═══════════════════════════════════════════
+//  PARTICLES
+// ═══════════════════════════════════════════
+let particles = [];
+
+function spawnParticles(cx, cy, color, count=12){
+  for(let i=0;i<count;i++){
+    const angle=Math.random()*Math.PI*2;
+    const speed=1+Math.random()*3;
+    particles.push({
+      x:cx, y:cy,
+      vx:Math.cos(angle)*speed,
+      vy:Math.sin(angle)*speed,
+      life:1, decay:0.02+Math.random()*0.02,
+      size:2+Math.random()*3,
+      color
+    });
+  }
+}
+
+function updateParticles(dt){
+  const spd=dt/16;
+  particles=particles.filter(p=>{
+    p.x+=p.vx*spd; p.y+=p.vy*spd;
+    p.vy+=0.05*spd; // gravity
+    p.life-=p.decay*spd;
+    return p.life>0;
+  });
+}
+
+function drawParticles(){
+  particles.forEach(p=>{
+    ctx.save();
+    ctx.globalAlpha=p.life;
+    ctx.fillStyle=p.color;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+// ═══════════════════════════════════════════
+//  REVEAL FADE ANIMATION
+// ═══════════════════════════════════════════
+let revealFades = []; // [{x,y,alpha}] — newly captured cells fading in
+
+function addRevealFade(cells){
+  cells.forEach(({x,y})=>{
+    // Only add if not already fading
+    if(!revealFades.find(f=>f.x===x&&f.y===y)){
+      revealFades.push({x,y,alpha:0});
+    }
+  });
+}
+
+function updateRevealFades(dt){
+  const speed=dt/300; // 300ms fade-in
+  revealFades=revealFades.filter(f=>{
+    f.alpha=Math.min(1,f.alpha+speed);
+    return f.alpha<1;
+  });
+}
+
+// ═══════════════════════════════════════════
+//  POWER-UPS
+// ═══════════════════════════════════════════
+let activePowerup = null;   // {type, x, y, angle}
+let powerupEffect = null;   // {type, timeLeft}
+let powerupSpawnTimer = 0;
+const POWERUP_TYPES = ['shield','freeze','speed','bomb'];
+const POWERUP_COLORS = {shield:'#00A3E0',freeze:'#FFFFFF',speed:'#FCD116',bomb:'#FF6B00'};
+const POWERUP_ICONS  = {shield:'🛡',freeze:'❄',speed:'⚡',bomb:'💣'};
+
+function spawnPowerup(){
+  if(activePowerup) return;
+  // Find random free cell away from border
+  let attempts=0, gx, gy;
+  do {
+    gx=4+Math.floor(Math.random()*(gridW-8));
+    gy=4+Math.floor(Math.random()*(gridH-8));
+    attempts++;
+  } while(grid[gy*gridW+gx]!==0 && attempts<50);
+  if(attempts>=50) return;
+  const type=POWERUP_TYPES[Math.floor(Math.random()*POWERUP_TYPES.length)];
+  activePowerup={type, x:gx*CELL+CELL/2, y:gy*CELL+CELL/2, angle:0, pulse:0};
+}
+
+function updatePowerups(dt){
+  // Spawn timer: 25-40s random interval
+  if(!G.nextPowerupIn) G.nextPowerupIn=(25000+Math.random()*15000);
+  powerupSpawnTimer+=dt;
+  if(powerupSpawnTimer>=G.nextPowerupIn){
+    powerupSpawnTimer=0;
+    G.nextPowerupIn=25000+Math.random()*15000;
+    spawnPowerup();
+  }
+
+  if(activePowerup){
+    activePowerup.angle+=0.03;
+    activePowerup.pulse=(activePowerup.pulse||0)+dt;
+
+    // Check collection: trail passes over powerup
+    if(isDrawing && trail.length>0){
+      const last=trail[trail.length-1];
+      const dx=Math.abs(last.x*CELL+CELL/2-activePowerup.x);
+      const dy=Math.abs(last.y*CELL+CELL/2-activePowerup.y);
+      if(dx<CELL*2&&dy<CELL*2) collectPowerup();
+    }
+  }
+
+  // Tick active effect
+  if(powerupEffect){
+    powerupEffect.timeLeft-=dt;
+    if(powerupEffect.timeLeft<=0){
+      endPowerupEffect();
+    }
+  }
+}
+
+function collectPowerup(){
+  if(!activePowerup) return;
+  const type=activePowerup.type;
+  activePowerup=null;
+  applyPowerup(type);
+}
+
+function applyPowerup(type){
+  showBonusText(POWERUP_ICONS[type]+' '+type.toUpperCase()+'!');
+  // Haptic
+  if(navigator.vibrate) navigator.vibrate([30,10,30]);
+
+  switch(type){
+    case 'shield':
+      powerupEffect={type:'shield', timeLeft:5000};
+      break;
+    case 'freeze':
+      powerupEffect={type:'freeze', timeLeft:3000};
+      enemies.forEach(en=>{en._frozenVx=en.vx;en._frozenVy=en.vy;en.vx=0;en.vy=0;});
+      break;
+    case 'speed':
+      powerupEffect={type:'speed', timeLeft:4000};
+      break;
+    case 'bomb':
+      // Capture all currently visible free cells in a radius
+      const cx=player.gx, cy=player.gy;
+      const radius=Math.floor(Math.min(gridW,gridH)*0.2);
+      let bombCells=0;
+      for(let y=0;y<gridH;y++) for(let x=0;x<gridW;x++){
+        if(grid[y*gridW+x]===0){
+          const d=Math.hypot(x-cx,y-cy);
+          if(d<=radius){grid[y*gridW+x]=1;bombCells++;}
+        }
+      }
+      const pts=bombCells*15*G.level;
+      G.score+=pts; G.totalScore+=pts;
+      showBonusText('💣 +'+pts.toLocaleString());
+      checkWin();
+      break;
+  }
+}
+
+function endPowerupEffect(){
+  if(!powerupEffect) return;
+  if(powerupEffect.type==='freeze'){
+    enemies.forEach(en=>{
+      if(en._frozenVx!==undefined){en.vx=en._frozenVx;en.vy=en._frozenVy;}
+      else{en.vx=(Math.random()<0.5?1:-1)*1.5;en.vy=(Math.random()<0.5?1:-1)*1.5;}
+    });
+  }
+  powerupEffect=null;
+}
+
+function isPowerupShield(){ return powerupEffect?.type==='shield'; }
+function isPowerupSpeed(){  return powerupEffect?.type==='speed';  }
+
+function drawPowerup(){
+  if(!activePowerup) return;
+  const{x,y,angle,pulse,type}=activePowerup;
+  const col=POWERUP_COLORS[type];
+  const icon=POWERUP_ICONS[type];
+  const pulseSz=1+Math.sin(pulse/200)*0.12;
+
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(angle);
+  ctx.scale(pulseSz,pulseSz);
+
+  // Glow circle
+  ctx.beginPath();
+  ctx.arc(0,0,CELL*2.5,0,Math.PI*2);
+  ctx.fillStyle=col+'33';
+  ctx.fill();
+  ctx.strokeStyle=col;
+  ctx.lineWidth=1.5;
+  ctx.stroke();
+
+  // Icon
+  ctx.rotate(-angle);
+  ctx.font=`${CELL*2.8}px serif`;
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText(icon,0,1);
+  ctx.restore();
+
+  // Active effect indicator on HUD
+  if(powerupEffect){
+    const pct=powerupEffect.timeLeft/(type==='shield'?5000:type==='freeze'?3000:4000);
+    ctx.fillStyle=POWERUP_COLORS[powerupEffect.type]+'88';
+    ctx.fillRect(4,4,Math.floor((gridW*CELL-8)*pct),3);
   }
 }
 
@@ -1163,7 +1464,14 @@ function draw(){
     ctx.globalAlpha=1;
   }
 
+  // Reveal flash on newly captured cells
+  drawParticles();
+  revealFades.forEach(f=>{
+    ctx.fillStyle=`rgba(255,255,255,${(1-f.alpha)*0.35})`;
+    ctx.fillRect(f.x*CELL,f.y*CELL,CELL,CELL);
+  });
   enemies.forEach(drawEnemy);
+  drawPowerup();
   drawPlayer();
 
   // Bonus text
@@ -1548,6 +1856,92 @@ function showVersusResult() {
       profileId: r.profile.id,
     });
   });
+}
+
+
+// ═══════════════════════════════════════════
+//  STATISTICS
+// ═══════════════════════════════════════════
+async function renderStats(){
+  if(!activeProfile) return;
+  const scores = await dbAll('scores');
+  const myScores = scores.filter(s=>s.profileId===activeProfile.id);
+  myScores.sort((a,b)=>new Date(a.date)-new Date(b.date));
+
+  const st = activeProfile.stats||{};
+  const totalPlayed = st.played||0;
+  const maxLevel   = st.maxLevel||1;
+  const bestScore  = myScores.reduce((m,s)=>Math.max(m,s.score),0);
+  const avgPct     = myScores.length ? Math.round(myScores.reduce((s,x)=>s+(x.pct||0),0)/myScores.length) : 0;
+
+  // Mode breakdown
+  const byMode = {};
+  myScores.forEach(s=>{
+    const m=s.mode||'free';
+    if(!byMode[m]) byMode[m]={count:0,best:0};
+    byMode[m].count++;
+    byMode[m].best=Math.max(byMode[m].best,s.score);
+  });
+
+  const tbody = document.getElementById('statsBody');
+  const canvas = document.getElementById('statsChart');
+  if(!tbody||!canvas) return;
+
+  // Numbers
+  document.getElementById('statPlayed').textContent  = totalPlayed;
+  document.getElementById('statMaxLv').textContent   = maxLevel;
+  document.getElementById('statBest').textContent    = bestScore.toLocaleString();
+  document.getElementById('statAvgPct').textContent  = avgPct+'%';
+
+  // Mode rows
+  tbody.innerHTML = Object.entries(byMode).map(([m,d])=>`
+    <tr>
+      <td style="color:var(--muted);font-size:10px;">${m.replace('_',' ').toUpperCase()}</td>
+      <td style="text-align:right;color:var(--white);">${d.count}</td>
+      <td style="text-align:right;color:var(--cyan);">${d.best.toLocaleString()}</td>
+    </tr>`).join('') || '<tr><td colspan="3" style="color:var(--muted);text-align:center;">Sin partidas aún</td></tr>';
+
+  // Progress chart — last 20 scores
+  const last20 = myScores.slice(-20);
+  if(last20.length>1){
+    const cw=canvas.offsetWidth||300, ch=canvas.offsetHeight||80;
+    canvas.width=cw; canvas.height=ch;
+    const ctx2=canvas.getContext('2d');
+    ctx2.clearRect(0,0,cw,ch);
+    const maxS=Math.max(...last20.map(s=>s.score),1);
+    const pts=last20.map((s,i)=>({
+      x:i/(last20.length-1)*(cw-20)+10,
+      y:ch-10-(s.score/maxS)*(ch-20)
+    }));
+    ctx2.beginPath();
+    ctx2.strokeStyle='#00A3E0';
+    ctx2.lineWidth=2;
+    ctx2.moveTo(pts[0].x,pts[0].y);
+    pts.forEach(p=>ctx2.lineTo(p.x,p.y));
+    ctx2.stroke();
+    // Fill under line
+    ctx2.lineTo(pts[pts.length-1].x,ch);
+    ctx2.lineTo(pts[0].x,ch);
+    ctx2.closePath();
+    ctx2.fillStyle='rgba(0,163,224,0.15)';
+    ctx2.fill();
+    // Dots
+    pts.forEach(p=>{
+      ctx2.beginPath();
+      ctx2.arc(p.x,p.y,3,0,Math.PI*2);
+      ctx2.fillStyle='#00A3E0';
+      ctx2.fill();
+    });
+  }
+}
+
+async function saveGameStats(pct){
+  if(!activeProfile) return;
+  activeProfile.stats = activeProfile.stats||{};
+  activeProfile.stats.played=(activeProfile.stats.played||0)+1;
+  activeProfile.stats.maxLevel=Math.max(activeProfile.stats.maxLevel||1,G.level);
+  await dbPut('profiles',activeProfile);
+  profiles=await dbAll('profiles');
 }
 
 // ─ BOOT ─
