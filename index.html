@@ -295,12 +295,12 @@ input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:20px; he
 }
 .ov-primary{ background:var(--cyan); color:var(--bg); }
 .ov-secondary{ background:transparent; border:1px solid var(--border) !important; color:var(--muted); }
-.swipe-hint{
+.swipe-hint{ z-index:4 !important;
   position:absolute; bottom:24px; left:50%; transform:translateX(-50%);
   font-size:9px; letter-spacing:3px; color:rgba(255,255,255,0.2);
   z-index:10; text-transform:uppercase; pointer-events:none; transition:opacity 1s;
 }
-.pause-btn{
+.pause-btn{ z-index:4 !important;
   position:absolute; bottom:16px; right:16px; width:36px; height:36px;
   background:rgba(26,59,139,0.8); border:1px solid rgba(0,163,224,0.3);
   border-radius:8px; color:var(--white); font-size:16px; cursor:pointer;
@@ -470,6 +470,7 @@ input[type=file]{ display:none; }
     <button class="home-btn hb-versus" onclick="initVersusSetup()" style="background:transparent;border:1px solid var(--orange);border-style:solid;color:var(--orange);">⚔ VERSUS</button>
     <button class="home-btn hb-scores" onclick="showScreen('scoresScreen')">🏆 TOP GLOBAL</button>
     <button class="home-btn hb-switch" onclick="showScreen('profileSelect')">⇄ CAMBIAR PERFIL</button>
+    <button class="home-btn" onclick="showScreen('photoManage')" style="background:transparent;border:1px solid var(--border);border-style:solid;color:var(--muted);font-size:10px;">📷 MIS FOTOS</button>
   </div>
 </div>
 
@@ -477,14 +478,12 @@ input[type=file]{ display:none; }
 <div id="albumScreen" class="screen">
   <div class="album-header">
     <button class="back-btn" onclick="showScreen('homeScreen')">←</button>
-    <div class="album-header-title">Mis Fotos</div>
+    <div class="album-header-title" id="albumHeaderTitle">Foto Aleatoria</div>
     <div class="album-count" id="albumCount">0/15</div>
   </div>
   <div class="album-body">
     <div class="album-grid" id="albumGrid"></div>
-    <div style="width:100%;max-width:400px;">
-      <button class="btn-secondary" onclick="showScreen('photoManage')" style="margin-top:4px;">⚙ GESTIONAR FOTOS</button>
-    </div>
+
   </div>
   <div class="album-footer">
     <button class="btn-primary" onclick="goToSetup()" id="albumPlayBtn" disabled>CONTINUAR →</button>
@@ -551,7 +550,24 @@ input[type=file]{ display:none; }
 
 <!-- GAME -->
 <div id="gameScreen" class="screen">
-  <div class="game-hud">
+  <img id="gamePhoto" style="
+    position:absolute;
+    top:44px;left:0;right:0;bottom:0;
+    width:100%;
+    height:calc(100dvh - 44px);
+    object-fit:cover;
+    object-position:center;
+    display:block;
+    z-index:0;
+  " src="" alt="">
+  <div id="gamePhotoOverlay" style="
+    position:absolute;
+    top:44px;left:0;right:0;
+    height:calc(100dvh - 44px);
+    z-index:1;
+    pointer-events:none;
+  "></div>
+  <div class="game-hud" style="z-index:3;">
     <div class="hud-item" id="hudAvatarWrap"></div>
     <div class="hud-item"><div class="hud-label">Score</div><div class="hud-value" id="hudScore">0</div></div>
     <div class="hud-item"><div class="hud-label">Cap.</div><div class="hud-value" id="hudPct">0%</div></div>
