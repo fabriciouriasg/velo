@@ -683,29 +683,51 @@ function initCanvas() {
 
   const screenW = window.innerWidth;
   const screenH = window.innerHeight;
-  const gameH   = screenH - HUD_H; // game area below HUD
+  // ── Adaptive viewport: works on any device, any OS ──
+  // visualViewport excludes soft keyboards, nav bars, notches
+  const vp      = window.visualViewport || { width: screenW, height: screenH,
+                                              offsetLeft: 0, offsetTop: 0 };
+  const vpW     = Math.floor(vp.width);
+  const vpH     = Math.floor(vp.height);
+  const vpLeft  = Math.floor(vp.offsetLeft  || 0);
+  const vpTop   = Math.floor(vp.offsetTop   || 0);
 
-  gridW = Math.floor(screenW / CELL);
-  gridH = Math.floor(gameH   / CELL);
+  // HUD sits at top — game area is everything below it within the visible viewport
+  const gameTop = HUD_H;           // px from canvas top (= HUD height)
+  const gameH   = vpH - gameTop;   // visible game height after HUD
+  const gameW   = vpW;             // full visible width
 
-  canvas.width  = gridW * CELL;
-  canvas.height = gridH * CELL;
-  canvas.style.width  = screenW + 'px';
-  canvas.style.height = gameH   + 'px';
-  canvas.style.top    = HUD_H   + 'px';
+  gridW = Math.floor(gameW / CELL);
+  gridH = Math.floor(gameH / CELL);
+
+  // Canvas = exact grid pixels, no partial cells sticking out of screen
+  const canvasW = gridW * CELL;
+  const canvasH = gridH * CELL;
+
+  // Center horizontally if gameW is not an exact CELL multiple
+  const hOffset = Math.floor((gameW - canvasW) / 2);
+
+  canvas.width  = canvasW;
+  canvas.height = canvasH;
+  canvas.style.width   = canvasW + 'px';
+  canvas.style.height  = canvasH + 'px';
+  canvas.style.top     = (vpTop + gameTop) + 'px';
+  canvas.style.left    = (vpLeft + hOffset) + 'px';
   canvas.style.imageRendering = 'high-quality';
 
-  // Native photo also limited to game area (below HUD)
+  // Native photo covers same exact area as canvas
   const nativePhoto2 = document.getElementById('gamePhoto');
   if(nativePhoto2){
-    nativePhoto2.style.top    = HUD_H + 'px';
-    nativePhoto2.style.height = gameH + 'px';
+    nativePhoto2.style.top    = (vpTop + gameTop) + 'px';
+    nativePhoto2.style.left   = (vpLeft + hOffset) + 'px';
+    nativePhoto2.style.width  = canvasW + 'px';
+    nativePhoto2.style.height = canvasH + 'px';
   }
 
-  // Offscreen canvas — rebuilt only when grid changes, avoids per-frame clip loop
+  // Offscreen canvas — same size as game canvas
   offCanvas = document.createElement('canvas');
-  offCanvas.width  = canvas.width;
-  offCanvas.height = canvas.height;
+  offCanvas.width  = canvasW;
+  offCanvas.height = canvasH;
   offCtx = offCanvas.getContext('2d');
   gridDirty = true;
 
