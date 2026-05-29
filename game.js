@@ -377,6 +377,10 @@ function renderAlbum() {
   const playBtn = document.getElementById('albumPlayBtn');
   grid.innerHTML = '';
   countEl.textContent = `${photos.length}/${MAX_PHOTOS}`;
+  // Auto-select first photo if none selected or selected not in album
+  if (photos.length > 0 && !photos.find(p => p.id === selectedPhotoId)) {
+    selectedPhotoId = photos[0].id;
+  }
 
   photos.forEach(p => {
     const wrap = document.createElement('div');
