@@ -621,24 +621,20 @@ function initCanvas() {
   canvas = document.getElementById('gameCanvas');
   ctx = canvas.getContext('2d');
 
-  const DPR = Math.min(window.devicePixelRatio || 1, 3);
   const screenW = window.innerWidth;
   const screenH = window.innerHeight - HUD_H;
 
-  // Grid is based on CSS pixels for game logic
+  // Grid and canvas in CSS pixels — fills the full screen correctly
   gridW = Math.floor(screenW / CELL);
   gridH = Math.floor(screenH / CELL);
-
-  // Canvas physical size = grid * DPR for crispy rendering
-  canvas.width  = gridW * CELL * DPR;
-  canvas.height = gridH * CELL * DPR;
+  canvas.width  = gridW * CELL;
+  canvas.height = gridH * CELL;
   canvas.style.width  = (gridW * CELL) + 'px';
   canvas.style.height = (gridH * CELL) + 'px';
   canvas.style.marginTop = HUD_H + 'px';
 
-  // Scale all drawing operations by DPR
-  ctx.scale(DPR, DPR);
-  G._dpr = DPR;
+  // Enable crispy image rendering via CSS
+  canvas.style.imageRendering = 'high-quality';
 
   grid = new Uint8Array(gridW * gridH).fill(0);
   for (let x = 0; x < gridW; x++) { setCell(x, 0, 2); setCell(x, gridH-1, 2); }
@@ -1046,7 +1042,6 @@ function loseLife(){
 
 // ── DRAW ──
 function draw(){
-  // Use CSS pixel dimensions (DPR scaling is already applied via ctx.scale)
   const W = gridW * CELL;
   const H = gridH * CELL;
   ctx.clearRect(0,0,W,H);
