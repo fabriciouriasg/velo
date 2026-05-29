@@ -621,6 +621,9 @@ function endGame() {
   if (animId) cancelAnimationFrame(animId);
   if (G.timerInterval) clearInterval(G.timerInterval);
   paused = false;
+  // Clear native photo
+  const np = document.getElementById('gamePhoto');
+  if(np) np.src='';
   showScreen('homeScreen');
   G = {};
 }
@@ -721,12 +724,16 @@ function initCanvas() {
     }, 1000);
   }
 
-  // Load wallpaper for background if not cached
+  // Load wallpaper for veil background
   if (!wallpaperImg) {
     wallpaperImg = new Image();
     wallpaperImg.src = document.getElementById('homeScreen').style.backgroundImage
       .replace(/url\(["']?/, '').replace(/["']?\)$/, '');
   }
+
+  // Set native <img> for perfect quality photo reveal
+  const nativePhoto = document.getElementById('gamePhoto');
+  nativePhoto.src = G.photo;
 
   gameImg = new Image();
   gameImg.onload = () => {
@@ -835,7 +842,17 @@ function movePlayer() {
   if (nx<0||nx>=gridW||ny<0||ny>=gridH){ player.moving=false; return; }
   const cell = getCell(nx,ny);
   if (isDrawing) {
-    if (trail.some(t=>t.x===nx&&t.y===ny&&!(nx===trail[0].x&&ny===trail[0].y))){ loseLife(); return; }
+    // Check if we hit our own trail (not the start point)
+    const trailIdx = trail.findIndex(t=>t.x===nx&&t.y===ny);
+    const isStart = nx===trail[0].x&&ny===trail[0].y;
+    if (trailIdx>0 && !isStart) {
+      // Retrace: erase trail from current pos back to where we hit
+      const removeFrom = trailIdx+1;
+      for(let i=removeFrom;i<trail.length;i++) setCell(trail[i].x,trail[i].y,0);
+      trail.splice(removeFrom);
+      player.gx=nx; player.gy=ny;
+      return;
+    }
     if (cell===2||cell===1) {
       trail.push({x:nx,y:ny});
       fillRegion(); isDrawing=false; trail=[];
@@ -1094,45 +1111,40 @@ function loseLife(){
 function draw(){
   const W = gridW * CELL;
   const H = gridH * CELL;
+  // Clear to transparent — native img shows through holes
   ctx.clearRect(0,0,W,H);
 
-  if(gameImg.complete&&gameImg.naturalWidth){
+  {
     const W=gridW*CELL, H=gridH*CELL;
 
-    ctx.imageSmoothingEnabled=true;
-    ctx.imageSmoothingQuality='high';
-
-    // Step 1: Draw wallpaper on entire canvas (uncaptured bg)
+    // Draw wallpaper veil over entire canvas
     if(wallpaperImg&&wallpaperImg.complete&&wallpaperImg.naturalWidth){
       const ww=wallpaperImg.naturalWidth, wh=wallpaperImg.naturalHeight;
       const ws=Math.max(W/ww,H/wh);
-      ctx.drawImage(wallpaperImg, (W-ww*ws)/2, (H-wh*ws)/2, ww*ws, wh*ws);
-      // Darken wallpaper so uncaptured zone is clearly different
-      ctx.fillStyle='rgba(10,10,20,0.55)';
+      ctx.drawImage(wallpaperImg,(W-ww*ws)/2,(H-wh*ws)/2,ww*ws,wh*ws);
+      ctx.fillStyle='rgba(8,8,18,0.52)';
       ctx.fillRect(0,0,W,H);
     } else {
-      ctx.fillStyle='#0a0a14';
+      ctx.fillStyle='#08080f';
       ctx.fillRect(0,0,W,H);
     }
 
-    // Step 2: clip to captured cells, draw full photo perfectly crisp
-    const iw=gameImg.naturalWidth, ih=gameImg.naturalHeight;
-    const scale=Math.max(W/iw,H/ih);
-    const sw=iw*scale, sh=ih*scale;
-    const sx=(W-sw)/2, sy=(H-sh)/2;
-
+    // Cut transparent holes for captured cells — reveals native img below
+    // Use destination-out composite: draw captured rects as transparent
     ctx.save();
-    ctx.beginPath();
+    ctx.globalCompositeOperation='destination-out';
+    ctx.fillStyle='rgba(0,0,0,1)';
     for(let y=0;y<gridH;y++){
       for(let x=0;x<gridW;x++){
         if(grid[y*gridW+x]===1){
-          ctx.rect(x*CELL,y*CELL,CELL,CELL);
+          // No gap — exact cell size, perfectly flush
+          ctx.fillRect(x*CELL, y*CELL, CELL, CELL);
         }
       }
     }
-    ctx.clip();
-    ctx.drawImage(gameImg,sx,sy,sw,sh);
     ctx.restore();
+    // Reset composite to normal
+    ctx.globalCompositeOperation='source-over';
   }
 
   const trailCol = G.profile?.trailColor || '#FCD116';
