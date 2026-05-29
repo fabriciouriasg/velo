@@ -31,6 +31,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 let db;
 let profiles      = [];
 let wallpaperImg  = null; // app wallpaper for uncaptured bg
+let offCanvas     = null; // offscreen mask — only redrawn on grid change
+let offCtx        = null;
+let gridDirty     = true; // flag: rebuild offscreen mask next frame
 let activeProfile = null;  // full profile object
 let obNewProfile  = {};    // profile being built in onboarding
 let G             = {};    // game state
@@ -679,18 +682,32 @@ function initCanvas() {
   ctx = canvas.getContext('2d');
 
   const screenW = window.innerWidth;
-  const screenH = window.innerHeight; // full height — canvas is absolute
+  const screenH = window.innerHeight;
+  const gameH   = screenH - HUD_H; // game area below HUD
 
   gridW = Math.floor(screenW / CELL);
-  gridH = Math.floor(screenH / CELL);
+  gridH = Math.floor(gameH   / CELL);
+
   canvas.width  = gridW * CELL;
   canvas.height = gridH * CELL;
   canvas.style.width  = screenW + 'px';
-  canvas.style.height = screenH + 'px';
-  
-
-  // Enable crispy image rendering via CSS
+  canvas.style.height = gameH   + 'px';
+  canvas.style.top    = HUD_H   + 'px';
   canvas.style.imageRendering = 'high-quality';
+
+  // Native photo also limited to game area (below HUD)
+  const nativePhoto2 = document.getElementById('gamePhoto');
+  if(nativePhoto2){
+    nativePhoto2.style.top    = HUD_H + 'px';
+    nativePhoto2.style.height = gameH + 'px';
+  }
+
+  // Offscreen canvas — rebuilt only when grid changes, avoids per-frame clip loop
+  offCanvas = document.createElement('canvas');
+  offCanvas.width  = canvas.width;
+  offCanvas.height = canvas.height;
+  offCtx = offCanvas.getContext('2d');
+  gridDirty = true;
 
   grid = new Uint8Array(gridW * gridH).fill(0);
   for (let x = 0; x < gridW; x++) { setCell(x, 0, 2); setCell(x, gridH-1, 2); }
@@ -773,7 +790,7 @@ function initCanvas() {
   };
   gameImg.src = G.photo;
 
-  activePowerup=null; powerupEffect=null; powerupSpawnTimer=0;
+  activePowerup=null; powerupEffect=null; powerupSpawnTimer=0; gridDirty=true;
   document.getElementById('winOverlay').classList.remove('active');
   document.getElementById('loseOverlay').classList.remove('active');
   document.getElementById('pauseOverlay').classList.remove('active');
@@ -801,7 +818,7 @@ function renderHudAvatar() {
   }
 }
 
-function setCell(x,y,v){ if(x>=0&&x<gridW&&y>=0&&y<gridH) grid[y*gridW+x]=v; }
+function setCell(x,y,v){ if(x>=0&&x<gridW&&y>=0&&y<gridH){ grid[y*gridW+x]=v; gridDirty=true; } }
 function getCell(x,y)  { if(x<0||x>=gridW||y<0||y>=gridH) return -1; return grid[y*gridW+x]; }
 
 // ── SWIPE ──
@@ -947,7 +964,7 @@ function fillRegion() {
   let cells=0;
   const newlyCaptured=[];
   for(let i=0;i<grid.length;i++) if(fillMark[i]&&grid[i]===0){
-    grid[i]=1;cells++;
+    grid[i]=1;cells++;gridDirty=true;
     newlyCaptured.push({x:i%gridW,y:Math.floor(i/gridW)});
   }
   addRevealFade(newlyCaptured);
@@ -1273,14 +1290,14 @@ const POWERUP_ICONS  = {shield:'🛡',freeze:'❄',speed:'⚡',bomb:'💣'};
 
 function spawnPowerup(){
   if(activePowerup) return;
-  // Find random free cell away from border
+  // Find random FREE (grid===0) cell away from border — never spawn on captured area
   let attempts=0, gx, gy;
   do {
     gx=4+Math.floor(Math.random()*(gridW-8));
     gy=4+Math.floor(Math.random()*(gridH-8));
     attempts++;
-  } while(grid[gy*gridW+gx]!==0 && attempts<50);
-  if(attempts>=50) return;
+  } while(grid[gy*gridW+gx]!==0 && attempts<100);
+  if(attempts>=100) return; // no free cell found, skip
   const type=POWERUP_TYPES[Math.floor(Math.random()*POWERUP_TYPES.length)];
   activePowerup={type, x:gx*CELL+CELL/2, y:gy*CELL+CELL/2, angle:0, pulse:0};
 }
@@ -1299,12 +1316,17 @@ function updatePowerups(dt){
     activePowerup.angle+=0.03;
     activePowerup.pulse=(activePowerup.pulse||0)+dt;
 
-    // Check collection: trail passes over powerup
-    if(isDrawing && trail.length>0){
-      const last=trail[trail.length-1];
-      const dx=Math.abs(last.x*CELL+CELL/2-activePowerup.x);
-      const dy=Math.abs(last.y*CELL+CELL/2-activePowerup.y);
-      if(dx<CELL*2&&dy<CELL*2) collectPowerup();
+    // Safety: if power-up is now in a captured/border cell, remove without activating
+    const _pgx=Math.floor(activePowerup.x/CELL);
+    const _pgy=Math.floor(activePowerup.y/CELL);
+    const _cell=getCell(_pgx,_pgy);
+    if(_cell===2){ activePowerup=null; } // border cell — remove silently
+
+    // Collect when the cell under the power-up becomes captured (grid===1)
+    const pgx = Math.floor(activePowerup.x / CELL);
+    const pgy = Math.floor(activePowerup.y / CELL);
+    if(getCell(pgx, pgy) === 1){
+      collectPowerup();
     }
   }
 
@@ -1348,7 +1370,7 @@ function applyPowerup(type){
       for(let y=0;y<gridH;y++) for(let x=0;x<gridW;x++){
         if(grid[y*gridW+x]===0){
           const d=Math.hypot(x-cx,y-cy);
-          if(d<=radius){grid[y*gridW+x]=1;bombCells++;}
+          if(d<=radius){grid[y*gridW+x]=1;bombCells++;gridDirty=true;}
         }
       }
       const pts=bombCells*15*G.level;
@@ -1420,34 +1442,40 @@ function draw(){
   {
     const W=gridW*CELL, H=gridH*CELL;
 
-    // Draw wallpaper veil over entire canvas
-    if(wallpaperImg&&wallpaperImg.complete&&wallpaperImg.naturalWidth){
-      const ww=wallpaperImg.naturalWidth, wh=wallpaperImg.naturalHeight;
-      const ws=Math.max(W/ww,H/wh);
-      ctx.drawImage(wallpaperImg,(W-ww*ws)/2,(H-wh*ws)/2,ww*ws,wh*ws);
-      ctx.fillStyle='rgba(8,8,18,0.52)';
-      ctx.fillRect(0,0,W,H);
-    } else {
-      ctx.fillStyle='#08080f';
-      ctx.fillRect(0,0,W,H);
-    }
-
-    // Cut transparent holes for captured cells — reveals native img below
-    // Use destination-out composite: draw captured rects as transparent
-    ctx.save();
-    ctx.globalCompositeOperation='destination-out';
-    ctx.fillStyle='rgba(0,0,0,1)';
-    for(let y=0;y<gridH;y++){
-      for(let x=0;x<gridW;x++){
-        if(grid[y*gridW+x]===1){
-          // No gap — exact cell size, perfectly flush
-          ctx.fillRect(x*CELL, y*CELL, CELL, CELL);
+    // Rebuild offscreen mask only when grid changed (not every frame)
+    if(gridDirty){
+      gridDirty=false;
+      // Step 1: fill offscreen with wallpaper veil
+      if(wallpaperImg&&wallpaperImg.complete&&wallpaperImg.naturalWidth){
+        const ww=wallpaperImg.naturalWidth, wh=wallpaperImg.naturalHeight;
+        const ws=Math.max(W/ww,H/wh);
+        offCtx.drawImage(wallpaperImg,(W-ww*ws)/2,(H-wh*ws)/2,ww*ws,wh*ws);
+        offCtx.fillStyle='rgba(8,8,18,0.52)';
+        offCtx.fillRect(0,0,W,H);
+      } else {
+        offCtx.fillStyle='#08080f';
+        offCtx.fillRect(0,0,W,H);
+      }
+      // Step 2: punch holes for captured cells
+      offCtx.globalCompositeOperation='destination-out';
+      offCtx.fillStyle='rgba(0,0,0,1)';
+      // Batch rows for fewer draw calls
+      for(let y=0;y<gridH;y++){
+        let runStart=-1;
+        for(let x=0;x<=gridW;x++){
+          const captured=(x<gridW)&&(grid[y*gridW+x]===1);
+          if(captured&&runStart<0){ runStart=x; }
+          else if(!captured&&runStart>=0){
+            offCtx.fillRect(runStart*CELL, y*CELL, (x-runStart)*CELL, CELL);
+            runStart=-1;
+          }
         }
       }
+      offCtx.globalCompositeOperation='source-over';
     }
-    ctx.restore();
-    // Reset composite to normal
-    ctx.globalCompositeOperation='source-over';
+
+    // Blit offscreen mask onto main canvas — single draw call
+    ctx.drawImage(offCanvas, 0, 0);
   }
 
   const trailCol = G.profile?.trailColor || '#FCD116';
