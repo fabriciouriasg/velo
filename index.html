@@ -82,7 +82,7 @@ body{ background:var(--bg); color:var(--text); font-family:'Share Tech Mono',mon
 
 /* ── ONBOARDING ── */
 #onboarding{ background:var(--bg); padding:0; justify-content:flex-start; }
-.ob-step{ display:none; flex-direction:column; align-items:center; width:100%; height:100dvh; padding:24px 20px; gap:0; overflow-y:auto; }
+.ob-step{ display:none; flex-direction:column; align-items:center; width:100%; height:100dvh; padding:24px 20px; gap:0; overflow-y:auto; overflow-x:hidden; }
 .ob-step.active{ display:flex; }
 .ob-header{ display:flex; align-items:center; width:100%; max-width:400px; margin-bottom:24px; gap:12px; }
 .ob-back{ background:none; border:none; color:var(--muted); font-size:22px; cursor:pointer; padding:4px; }
@@ -138,20 +138,21 @@ body{ background:var(--bg); color:var(--text); font-family:'Share Tech Mono',mon
 
 /* Photo upload zone */
 .photo-upload-zone{
-  width:100%; max-width:400px; min-height:160px; background:var(--panel);
+  width:100%; max-width:400px; min-height:80px; background:var(--panel);
   border:2px dashed var(--border); border-radius:12px;
   display:flex; flex-direction:column; align-items:center;
   justify-content:center; gap:8px; cursor:pointer; margin-bottom:16px;
-  padding:20px;
+  padding:16px; flex-shrink:0;
 }
 .photo-upload-zone:active{ border-color:var(--cyan); }
 .puz-icon{ font-size:36px; opacity:0.4; }
 .puz-text{ font-size:11px; letter-spacing:2px; color:var(--muted); text-align:center; }
 .puz-count{ font-size:10px; color:var(--cyan); letter-spacing:2px; }
-.photo-mini-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:4px; width:100%; max-width:400px; margin-bottom:12px; }
+.photo-mini-grid{ display:grid; grid-template-columns:repeat(5,1fr); gap:4px; width:100%; max-width:400px; margin-bottom:12px; flex-shrink:0; }
 .photo-mini{
   aspect-ratio:1; border-radius:4px; object-fit:cover;
   border:1.5px solid var(--border); cursor:pointer; position:relative;
+  width:100%; max-width:100%;
 }
 .photo-mini.empty{ background:var(--panel); border-style:dashed; }
 .photo-mini-del{

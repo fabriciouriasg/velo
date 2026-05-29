@@ -94,6 +94,11 @@ async function initApp() {
     if (found) {
       activeProfile = found;
       showScreen('homeScreen');
+    } else if (profiles.length === 1) {
+      // Only one profile — auto-select it
+      activeProfile = profiles[0];
+      localStorage.setItem('velo_active_profile', profiles[0].id);
+      showScreen('homeScreen');
     } else {
       showScreen('profileSelect');
     }
@@ -329,8 +334,9 @@ function goToObStep(n) {
 async function saveNewProfile() {
   await dbPut('profiles', obNewProfile);
   profiles = await dbAll('profiles');
-  activeProfile = obNewProfile;
-  localStorage.setItem('velo_active_profile', obNewProfile.id);
+  // Reload fresh from DB to ensure data is correct
+  activeProfile = profiles.find(p => p.id === obNewProfile.id) || obNewProfile;
+  localStorage.setItem('velo_active_profile', activeProfile.id);
   showScreen('homeScreen');
 }
 
@@ -950,7 +956,22 @@ async function clearScores(){
 function fileToDataURL(file){
   return new Promise(res=>{
     const r=new FileReader();
-    r.onload=e=>res(e.target.result);
+    r.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        const MAX=900;
+        let w=img.width, h=img.height;
+        if(w>MAX||h>MAX){
+          if(w>h){ h=Math.round(h*MAX/w); w=MAX; }
+          else    { w=Math.round(w*MAX/h); h=MAX; }
+        }
+        const c=document.createElement('canvas');
+        c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        res(c.toDataURL('image/jpeg',0.82));
+      };
+      img.src=e.target.result;
+    };
     r.readAsDataURL(file);
   });
 }
