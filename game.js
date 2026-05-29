@@ -416,12 +416,7 @@ function renderAlbumPreview() {
     grid.appendChild(wrap);
   });
 
-  // Show "random" badge on play button
-  playBtn.disabled = false;
-  playBtn.textContent = '🎲 FOTO ALEATORIA — JUGAR';
-
-  // Show CONTINUAR button — no auto-advance
-  const playBtn = document.getElementById('albumPlayBtn');
+  // Update play button — no auto-advance
   playBtn.textContent = '▶ CONTINUAR';
   playBtn.disabled = false;
 }
