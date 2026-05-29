@@ -754,6 +754,7 @@ function initCanvas() {
   // Set native <img> for perfect quality photo reveal
   const nativePhoto = document.getElementById('gamePhoto');
   nativePhoto.src = G.photo;
+  nativePhoto.style.top = HUD_H + 'px';
 
   gameImg = new Image();
   gameImg.onload = () => {
@@ -799,12 +800,6 @@ function getCell(x,y)  { if(x<0||x>=gridW||y<0||y>=gridH) return -1; return grid
 // ── SWIPE ──
 let touchStart = null;
 function setupSwipe() {
-  const old = canvas.cloneNode(false);
-  canvas.parentNode.replaceChild(old, canvas);
-  canvas = document.getElementById('gameCanvas');
-  ctx = canvas.getContext('2d');
-  canvas.style.marginTop = HUD_H + 'px';
-
   canvas.addEventListener('touchstart', e => {
     e.preventDefault();
     const t = e.changedTouches[0];
