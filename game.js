@@ -621,13 +621,24 @@ function initCanvas() {
   canvas = document.getElementById('gameCanvas');
   ctx = canvas.getContext('2d');
 
+  const DPR = Math.min(window.devicePixelRatio || 1, 3);
   const screenW = window.innerWidth;
   const screenH = window.innerHeight - HUD_H;
+
+  // Grid is based on CSS pixels for game logic
   gridW = Math.floor(screenW / CELL);
   gridH = Math.floor(screenH / CELL);
-  canvas.width  = gridW * CELL;
-  canvas.height = gridH * CELL;
+
+  // Canvas physical size = grid * DPR for crispy rendering
+  canvas.width  = gridW * CELL * DPR;
+  canvas.height = gridH * CELL * DPR;
+  canvas.style.width  = (gridW * CELL) + 'px';
+  canvas.style.height = (gridH * CELL) + 'px';
   canvas.style.marginTop = HUD_H + 'px';
+
+  // Scale all drawing operations by DPR
+  ctx.scale(DPR, DPR);
+  G._dpr = DPR;
 
   grid = new Uint8Array(gridW * gridH).fill(0);
   for (let x = 0; x < gridW; x++) { setCell(x, 0, 2); setCell(x, gridH-1, 2); }
@@ -1035,29 +1046,46 @@ function loseLife(){
 
 // ── DRAW ──
 function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // Use CSS pixel dimensions (DPR scaling is already applied via ctx.scale)
+  const W = gridW * CELL;
+  const H = gridH * CELL;
+  ctx.clearRect(0,0,W,H);
   const bg = G.profile?.bgColor || '#111111';
   ctx.fillStyle = bg;
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillRect(0,0,W,H);
 
   if(gameImg.complete&&gameImg.naturalWidth){
+    // Draw full image (cover fit) using CSS pixel dimensions
+    const W=gridW*CELL, H=gridH*CELL;
+    const iw=gameImg.naturalWidth, ih=gameImg.naturalHeight;
+    const scale=Math.max(W/iw, H/ih);
+    const sw=iw*scale, sh=ih*scale;
+    const sx=(W-sw)/2, sy=(H-sh)/2;
+
+    // Enable high quality image smoothing
+    ctx.imageSmoothingEnabled=true;
+    ctx.imageSmoothingQuality='high';
+    ctx.drawImage(gameImg,sx,sy,sw,sh);
+
+    // Inverse mask: cover uncaptured cells with bg color
+    // Draw all uncaptured rects in one fill call for performance
     ctx.save();
     ctx.beginPath();
-    for(let y=0;y<gridH;y++) for(let x=0;x<gridW;x++) if(grid[y*gridW+x]===1) ctx.rect(x*CELL,y*CELL,CELL,CELL);
-    ctx.clip();
-    // object-fit: cover — mantiene proporción y llena el canvas
-    const iw = gameImg.naturalWidth, ih = gameImg.naturalHeight;
-    const cw = canvas.width, ch = canvas.height;
-    const scale = Math.max(cw/iw, ch/ih);
-    const sw = iw*scale, sh = ih*scale;
-    const sx = (cw - sw) / 2, sy = (ch - sh) / 2;
-    ctx.drawImage(gameImg, sx, sy, sw, sh);
+    for(let y=0;y<gridH;y++){
+      for(let x=0;x<gridW;x++){
+        if(grid[y*gridW+x]!==1){
+          ctx.rect(x*CELL,y*CELL,CELL,CELL);
+        }
+      }
+    }
+    ctx.fillStyle=G.profile?.bgColor||'#111111';
+    ctx.fill();
     ctx.restore();
   }
 
   const trailCol = G.profile?.trailColor || '#FCD116';
-  // Border cells — invisible, just 1px subtle line
-  ctx.fillStyle = 'rgba(0,163,224,0.12)';
+  // Border cells — nearly invisible
+  ctx.fillStyle = 'rgba(0,163,224,0.06)';
   for(let y=0;y<gridH;y++) for(let x=0;x<gridW;x++) if(grid[y*gridW+x]===2) ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
 
   // Trail
@@ -1083,7 +1111,7 @@ function draw(){
     ctx.textAlign='center';
     ctx.shadowColor='#FCD116';
     ctx.shadowBlur=10;
-    ctx.fillText(bonusText, canvas.width/2, canvas.height/2-40);
+    ctx.fillText(bonusText, gridW*CELL/2, gridH*CELL/2-40);
     ctx.restore();
     if(bonusTimer<=0) bonusText=null;
   }
@@ -1180,16 +1208,25 @@ function fileToDataURL(file){
     r.onload=e=>{
       const img=new Image();
       img.onload=()=>{
-        const MAX=900;
+        // Target: 1200px max side — covers 3x DPR screens (iPhone/Samsung 2021-2024)
+        const DPR = Math.min(window.devicePixelRatio||1, 3);
+        const MAX = Math.round(1200 * Math.min(DPR, 2)); // up to 2400px for 3x screens
         let w=img.width, h=img.height;
+        // Only downscale if larger than MAX, never upscale
         if(w>MAX||h>MAX){
           if(w>h){ h=Math.round(h*MAX/w); w=MAX; }
           else    { w=Math.round(w*MAX/h); h=MAX; }
         }
         const c=document.createElement('canvas');
         c.width=w; c.height=h;
-        c.getContext('2d').drawImage(img,0,0,w,h);
-        res(c.toDataURL('image/jpeg',0.82));
+        const ctx2=c.getContext('2d');
+        ctx2.imageSmoothingEnabled=true;
+        ctx2.imageSmoothingQuality='high';
+        ctx2.drawImage(img,0,0,w,h);
+        // Use PNG for images smaller than 500KB source, JPEG 0.95 for larger
+        const fmt = file.size < 500000 ? 'image/png' : 'image/jpeg';
+        const quality = fmt === 'image/jpeg' ? 0.95 : undefined;
+        res(c.toDataURL(fmt, quality));
       };
       img.src=e.target.result;
     };
