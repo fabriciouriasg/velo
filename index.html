@@ -550,17 +550,18 @@ input[type=file]{ display:none; }
 </div>
 
 <!-- GAME -->
-<div id="gameScreen" class="screen" style="position:relative;">
+<div id="gameScreen" class="screen" style="position:relative;overflow:hidden;">
+  <!-- Native photo layer — z-index 1, sits below canvas veil -->
   <img id="gamePhoto" style="
     position:absolute;
-    top:44px;left:0;right:0;bottom:0;
+    top:0;left:0;
     width:100%;
-    height:calc(100dvh - 44px);
+    height:100%;
     object-fit:cover;
     object-position:center;
-    display:block;
     z-index:1;
   " src="" alt="">
+  <!-- HUD always on top -->
   <div class="game-hud" style="position:absolute;top:0;left:0;right:0;z-index:10;">
     <div class="hud-item" id="hudAvatarWrap"></div>
     <div class="hud-item"><div class="hud-label">Score</div><div class="hud-value" id="hudScore">0</div></div>
