@@ -685,9 +685,9 @@ function initCanvas() {
   gridH = Math.floor(screenH / CELL);
   canvas.width  = gridW * CELL;
   canvas.height = gridH * CELL;
-  canvas.style.width  = (gridW * CELL) + 'px';
-  canvas.style.height = (gridH * CELL) + 'px';
-  canvas.style.marginTop = HUD_H + 'px';
+  canvas.style.width  = screenW + 'px';
+  canvas.style.height = screenH + 'px';
+  
 
   // Enable crispy image rendering via CSS
   canvas.style.imageRendering = 'high-quality';
