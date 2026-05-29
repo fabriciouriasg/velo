@@ -378,8 +378,19 @@ function renderAlbumPreview() {
     showScreen('photoManage');
     return;
   }
-  // Pick random photo
-  const random = photos[Math.floor(Math.random() * photos.length)];
+  // No-repeat randomizer: shuffle queue, don't repeat until all played
+  if(!activeProfile._photoQueue || activeProfile._photoQueue.length===0){
+    // Build shuffled queue from all photo ids
+    const ids = photos.map(p=>p.id);
+    for(let i=ids.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [ids[i],ids[j]]=[ids[j],ids[i]];
+    }
+    activeProfile._photoQueue = ids;
+  }
+  // Pick next from queue
+  const nextId = activeProfile._photoQueue.shift();
+  const random = photos.find(p=>p.id===nextId) || photos[0];
   selectedPhotoId = random.id;
 
   const grid = document.getElementById('albumGrid');
@@ -409,12 +420,10 @@ function renderAlbumPreview() {
   playBtn.disabled = false;
   playBtn.textContent = '🎲 FOTO ALEATORIA — JUGAR';
 
-  // Auto-advance to setup after brief preview (1.2s)
-  setTimeout(() => {
-    if (document.getElementById('albumScreen').classList.contains('active')) {
-      goToSetup();
-    }
-  }, 1200);
+  // Show CONTINUAR button — no auto-advance
+  const playBtn = document.getElementById('albumPlayBtn');
+  playBtn.textContent = '▶ CONTINUAR';
+  playBtn.disabled = false;
 }
 
 function renderAlbum() {
@@ -479,6 +488,8 @@ function renderManage() {
     const img = document.createElement('img');
     img.className = 'album-thumb';
     img.src = p.dataURL;
+
+    // Delete button
     const del = document.createElement('button');
     del.className = 'album-del';
     del.textContent = '×';
@@ -488,8 +499,30 @@ function renderManage() {
       await dbPut('profiles', activeProfile);
       renderManage();
     };
+
+    // Re-upload in HD button
+    const reup = document.createElement('button');
+    reup.style.cssText = `position:absolute;bottom:4px;right:4px;width:28px;height:18px;
+      border-radius:50%;background:rgba(0,163,224,0.9);border:none;color:#fff;
+      font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;`;
+    reup.title = 'Recargar en HD';
+    reup.textContent = 'HD↑';
+    reup.onclick = () => {
+      const inp = document.createElement('input');
+      inp.type='file'; inp.accept='image/*';
+      inp.onchange = async () => {
+        if(!inp.files[0]) return;
+        const dataURL = await fileToDataURL(inp.files[0]);
+        activeProfile.photos[i] = { id: p.id, dataURL };
+        await dbPut('profiles', activeProfile);
+        renderManage();
+      };
+      inp.click();
+    };
+
     wrap.appendChild(img);
     wrap.appendChild(del);
+    wrap.appendChild(reup);
     grid.appendChild(wrap);
   });
 
@@ -568,10 +601,19 @@ function nextLevel() {
   G.level++;
   G.lives = 3;
   G.score = 0;
-  // Random photo from album
+  // Use no-repeat queue for next level photo
   const photos = getPhotos();
-  const randomPhoto = photos[Math.floor(Math.random() * photos.length)];
-  G.photo = randomPhoto.dataURL;
+  if(!activeProfile._photoQueue || activeProfile._photoQueue.length===0){
+    const ids = photos.map(p=>p.id);
+    for(let i=ids.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [ids[i],ids[j]]=[ids[j],ids[i]];
+    }
+    activeProfile._photoQueue = ids;
+  }
+  const nextId = activeProfile._photoQueue.shift();
+  const nextPhoto = photos.find(p=>p.id===nextId) || photos[0];
+  G.photo = nextPhoto.dataURL;
   initCanvas();
 }
 
@@ -747,8 +789,9 @@ function setupSwipe() {
 }
 
 function setDir(dx,dy){
-  // Ignore exact opposite direction while moving to prevent trail self-collision
-  if(player.moving && player.dx===-dx && player.dy===-dy && (dx!==0||dy!==0)) return;
+  // While drawing: allow opposite direction — just change direction in place
+  // While on border (not drawing): ignore opposite to prevent accidental reversal
+  if(!isDrawing && player.moving && player.dx===-dx && player.dy===-dy && (dx!==0||dy!==0)) return;
   player.dx=dx; player.dy=dy; player.moving=true;
 }
 window.addEventListener('keydown', e => {
@@ -1050,32 +1093,30 @@ function draw(){
   ctx.fillRect(0,0,W,H);
 
   if(gameImg.complete&&gameImg.naturalWidth){
-    // Draw full image (cover fit) using CSS pixel dimensions
     const W=gridW*CELL, H=gridH*CELL;
     const iw=gameImg.naturalWidth, ih=gameImg.naturalHeight;
     const scale=Math.max(W/iw, H/ih);
     const sw=iw*scale, sh=ih*scale;
     const sx=(W-sw)/2, sy=(H-sh)/2;
 
-    // Enable high quality image smoothing
     ctx.imageSmoothingEnabled=true;
     ctx.imageSmoothingQuality='high';
+
+    // Draw full image first
     ctx.drawImage(gameImg,sx,sy,sw,sh);
 
-    // Inverse mask: cover uncaptured cells with bg color
-    // Draw all uncaptured rects in one fill call for performance
-    ctx.save();
-    ctx.beginPath();
+    // Cover uncaptured area with solid bg — expand each cell by 0.5px
+    // to eliminate sub-pixel gaps between adjacent captured cells
+    const bg = G.profile?.bgColor||'#111111';
+    ctx.fillStyle = bg;
     for(let y=0;y<gridH;y++){
       for(let x=0;x<gridW;x++){
         if(grid[y*gridW+x]!==1){
-          ctx.rect(x*CELL,y*CELL,CELL,CELL);
+          // Slightly overlap into neighboring cells to close any gap
+          ctx.fillRect(x*CELL-0.5, y*CELL-0.5, CELL+1, CELL+1);
         }
       }
     }
-    ctx.fillStyle=G.profile?.bgColor||'#111111';
-    ctx.fill();
-    ctx.restore();
   }
 
   const trailCol = G.profile?.trailColor || '#FCD116';
