@@ -17,7 +17,7 @@ const ENEMY_SHAPES   = ['hexagon','square','triangle'];
 const BG_OPTIONS     = ['#111111','#0a1628','#1a0a28','#081a08','#1a1208','#0a0a1a'];
 const MAX_PROFILES   = 3;
 const MAX_PHOTOS     = 15;
-const CELL           = 8;
+const CELL           = 4;
 const HUD_H          = 44;
 
 // ═══════════════════════════════════════════
@@ -30,6 +30,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // ═══════════════════════════════════════════
 let db;
 let profiles      = [];
+let wallpaperImg  = null; // app wallpaper for uncaptured bg
 let activeProfile = null;  // full profile object
 let obNewProfile  = {};    // profile being built in onboarding
 let G             = {};    // game state
@@ -720,6 +721,13 @@ function initCanvas() {
     }, 1000);
   }
 
+  // Load wallpaper for background if not cached
+  if (!wallpaperImg) {
+    wallpaperImg = new Image();
+    wallpaperImg.src = document.getElementById('homeScreen').style.backgroundImage
+      .replace(/url\(["']?/, '').replace(/["']?\)$/, '');
+  }
+
   gameImg = new Image();
   gameImg.onload = () => {
     renderHudAvatar();
@@ -1087,33 +1095,38 @@ function draw(){
   const W = gridW * CELL;
   const H = gridH * CELL;
   ctx.clearRect(0,0,W,H);
-  const bg = G.profile?.bgColor || '#111111';
-  ctx.fillStyle = bg;
-  ctx.fillRect(0,0,W,H);
 
   if(gameImg.complete&&gameImg.naturalWidth){
     const W=gridW*CELL, H=gridH*CELL;
-    const iw=gameImg.naturalWidth, ih=gameImg.naturalHeight;
-    const scale=Math.max(W/iw, H/ih);
-    const sw=iw*scale, sh=ih*scale;
-    const sx=(W-sw)/2, sy=(H-sh)/2;
 
     ctx.imageSmoothingEnabled=true;
     ctx.imageSmoothingQuality='high';
 
-    // Step 1: fill entire canvas with bg
-    const bg = G.profile?.bgColor||'#111111';
-    ctx.fillStyle = bg;
-    ctx.fillRect(0,0,W,H);
+    // Step 1: Draw wallpaper on entire canvas (uncaptured bg)
+    if(wallpaperImg&&wallpaperImg.complete&&wallpaperImg.naturalWidth){
+      const ww=wallpaperImg.naturalWidth, wh=wallpaperImg.naturalHeight;
+      const ws=Math.max(W/ww,H/wh);
+      ctx.drawImage(wallpaperImg, (W-ww*ws)/2, (H-wh*ws)/2, ww*ws, wh*ws);
+      // Darken wallpaper so uncaptured zone is clearly different
+      ctx.fillStyle='rgba(10,10,20,0.55)';
+      ctx.fillRect(0,0,W,H);
+    } else {
+      ctx.fillStyle='#0a0a14';
+      ctx.fillRect(0,0,W,H);
+    }
 
-    // Step 2: clip to captured cells only, draw full image inside clip
-    // This gives perfectly crispy edges with zero cell borders
+    // Step 2: clip to captured cells, draw full photo perfectly crisp
+    const iw=gameImg.naturalWidth, ih=gameImg.naturalHeight;
+    const scale=Math.max(W/iw,H/ih);
+    const sw=iw*scale, sh=ih*scale;
+    const sx=(W-sw)/2, sy=(H-sh)/2;
+
     ctx.save();
     ctx.beginPath();
     for(let y=0;y<gridH;y++){
       for(let x=0;x<gridW;x++){
         if(grid[y*gridW+x]===1){
-          ctx.rect(x*CELL, y*CELL, CELL, CELL);
+          ctx.rect(x*CELL,y*CELL,CELL,CELL);
         }
       }
     }
