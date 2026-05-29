@@ -1101,35 +1101,41 @@ function draw(){
     ctx.imageSmoothingEnabled=true;
     ctx.imageSmoothingQuality='high';
 
-    // Draw full image first
-    ctx.drawImage(gameImg,sx,sy,sw,sh);
-
-    // Cover uncaptured area with solid bg — expand each cell by 0.5px
-    // to eliminate sub-pixel gaps between adjacent captured cells
+    // Step 1: fill entire canvas with bg
     const bg = G.profile?.bgColor||'#111111';
     ctx.fillStyle = bg;
+    ctx.fillRect(0,0,W,H);
+
+    // Step 2: clip to captured cells only, draw full image inside clip
+    // This gives perfectly crispy edges with zero cell borders
+    ctx.save();
+    ctx.beginPath();
     for(let y=0;y<gridH;y++){
       for(let x=0;x<gridW;x++){
-        if(grid[y*gridW+x]!==1){
-          // Slightly overlap into neighboring cells to close any gap
-          ctx.fillRect(x*CELL-0.5, y*CELL-0.5, CELL+1, CELL+1);
+        if(grid[y*gridW+x]===1){
+          ctx.rect(x*CELL, y*CELL, CELL, CELL);
         }
       }
     }
+    ctx.clip();
+    ctx.drawImage(gameImg,sx,sy,sw,sh);
+    ctx.restore();
   }
 
   const trailCol = G.profile?.trailColor || '#FCD116';
-  // Border cells — nearly invisible
-  ctx.fillStyle = 'rgba(0,163,224,0.06)';
-  for(let y=0;y<gridH;y++) for(let x=0;x<gridW;x++) if(grid[y*gridW+x]===2) ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+  // Border cells — completely invisible, only used for game logic
 
-  // Trail
+  // Trail — 1px, perfil color, sin glow
   if(trail.length>1){
-    ctx.beginPath(); ctx.strokeStyle=trailCol; ctx.lineWidth=3;
-    ctx.shadowColor=trailCol; ctx.shadowBlur=8;
+    ctx.beginPath();
+    ctx.strokeStyle=trailCol;
+    ctx.lineWidth=1;
+    ctx.globalAlpha=0.85;
+    ctx.shadowBlur=0;
     ctx.moveTo(trail[0].x*CELL+CELL/2,trail[0].y*CELL+CELL/2);
     trail.forEach(t=>ctx.lineTo(t.x*CELL+CELL/2,t.y*CELL+CELL/2));
-    ctx.stroke(); ctx.shadowBlur=0;
+    ctx.stroke();
+    ctx.globalAlpha=1;
   }
 
   enemies.forEach(drawEnemy);
