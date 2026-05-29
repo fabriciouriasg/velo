@@ -390,20 +390,22 @@ function renderAlbumPreview() {
     showScreen('photoManage');
     return;
   }
-  // No-repeat randomizer: shuffle queue, don't repeat until all played
-  if(!activeProfile._photoQueue || activeProfile._photoQueue.length===0){
-    // Build shuffled queue from all photo ids
-    const ids = photos.map(p=>p.id);
-    for(let i=ids.length-1;i>0;i--){
-      const j=Math.floor(Math.random()*(i+1));
-      [ids[i],ids[j]]=[ids[j],ids[i]];
+
+  // If no photo selected yet, pick random from queue as suggestion
+  if (!selectedPhotoId || !photos.find(p => p.id === selectedPhotoId)) {
+    if(!activeProfile._photoQueue || activeProfile._photoQueue.length===0){
+      const ids = photos.map(p=>p.id);
+      for(let i=ids.length-1;i>0;i--){
+        const j=Math.floor(Math.random()*(i+1));
+        [ids[i],ids[j]]=[ids[j],ids[i]];
+      }
+      activeProfile._photoQueue = [...ids];
+      activeProfile._photoQueueFull = [...ids];
     }
-    activeProfile._photoQueue = ids;
+    // Suggest next from queue but DON'T consume it yet
+    const suggestedId = activeProfile._photoQueue[0];
+    selectedPhotoId = suggestedId || photos[0].id;
   }
-  // Pick next from queue
-  const nextId = activeProfile._photoQueue.shift();
-  const random = photos.find(p=>p.id===nextId) || photos[0];
-  selectedPhotoId = random.id;
 
   const grid = document.getElementById('albumGrid');
   const countEl = document.getElementById('albumCount');
@@ -415,21 +417,19 @@ function renderAlbumPreview() {
     const wrap = document.createElement('div');
     wrap.className = 'album-thumb-wrap';
     const img = document.createElement('img');
-    // Highlight the randomly selected one, rest are dimmed
-    img.className = 'album-thumb';
+    img.className = 'album-thumb' + (p.id === selectedPhotoId ? ' selected' : '');
     img.src = p.dataURL;
-    img.style.opacity = p.id === random.id ? '1' : '0.35';
-    img.style.cursor = 'default';
-    if (p.id === random.id) {
-      img.style.border = '2px solid var(--cyan)';
-      img.style.boxShadow = '0 0 10px var(--cyan)';
-    }
+    img.style.opacity = p.id === selectedPhotoId ? '1' : '0.5';
+    img.style.cursor = 'pointer';
+    img.onclick = () => {
+      selectedPhotoId = p.id;
+      renderAlbumPreview();
+    };
     wrap.appendChild(img);
     grid.appendChild(wrap);
   });
 
-  // Update play button — no auto-advance
-  playBtn.textContent = '▶ CONTINUAR';
+  playBtn.textContent = '▶ JUGAR CON ESTA FOTO';
   playBtn.disabled = false;
 }
 
@@ -556,6 +556,14 @@ async function handleManageFiles(files) {
 function goToSetup() {
   if (!selectedPhotoId) return;
   const photo = getPhotos().find(p => p.id === selectedPhotoId);
+  if (!photo) return;
+
+  // Consume selected photo from queue
+  if (activeProfile._photoQueue) {
+    const idx = activeProfile._photoQueue.indexOf(selectedPhotoId);
+    if (idx !== -1) activeProfile._photoQueue.splice(idx, 1);
+  }
+
   document.getElementById('selectedPreview').src = photo.dataURL;
   setupMode = 'free';
   setupSpeed = 'normal';
@@ -609,17 +617,18 @@ function nextLevel() {
   G.level++;
   G.lives = 3;
   G.score = 0;
-  // Use no-repeat queue for next level photo
+  // Use no-repeat queue for next level
   const photos = getPhotos();
   if(!activeProfile._photoQueue || activeProfile._photoQueue.length===0){
-    const ids = photos.map(p=>p.id);
+    const ids = photos.map(p=>p.id).filter(id=>id!==selectedPhotoId);
     for(let i=ids.length-1;i>0;i--){
       const j=Math.floor(Math.random()*(i+1));
       [ids[i],ids[j]]=[ids[j],ids[i]];
     }
     activeProfile._photoQueue = ids;
   }
-  const nextId = activeProfile._photoQueue.shift();
+  const nextId = activeProfile._photoQueue.shift() || photos[0].id;
+  selectedPhotoId = nextId;
   const nextPhoto = photos.find(p=>p.id===nextId) || photos[0];
   G.photo = nextPhoto.dataURL;
   initCanvas();
@@ -670,9 +679,8 @@ function initCanvas() {
   ctx = canvas.getContext('2d');
 
   const screenW = window.innerWidth;
-  const screenH = window.innerHeight - HUD_H;
+  const screenH = window.innerHeight; // full height — canvas is absolute
 
-  // Grid and canvas in CSS pixels — fills the full screen correctly
   gridW = Math.floor(screenW / CELL);
   gridH = Math.floor(screenH / CELL);
   canvas.width  = gridW * CELL;
@@ -754,7 +762,6 @@ function initCanvas() {
   // Set native <img> for perfect quality photo reveal
   const nativePhoto = document.getElementById('gamePhoto');
   nativePhoto.src = G.photo;
-  nativePhoto.style.top = HUD_H + 'px';
 
   gameImg = new Image();
   gameImg.onload = () => {
